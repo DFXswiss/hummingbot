@@ -369,15 +369,15 @@ class XtExchange(ExchangePyBase):
             try:
                 event_type = event_message.get("event")
                 if event_type == "order":
-                    order_update = event_message.get("data")
-                    client_order_id = order_update.get("ci")
+                    order_data = event_message.get("data")  # Renamed to avoid confusion
+                    client_order_id = order_data.get("ci")
                     
                     # Track WebSocket order update
                     if client_order_id:
                         self._ws_order_updates[client_order_id] = self.current_timestamp
                         self._performance_metrics["ws_updates_received"] += 1
                         self.logger().debug(
-                            f"WS order update for {client_order_id}: {order_update.get('st')} "
+                            f"WS order update for {client_order_id}: {order_data.get('st')} "
                             f"(Total WS updates: {self._performance_metrics['ws_updates_received']})"
                         )
 
@@ -386,7 +386,7 @@ class XtExchange(ExchangePyBase):
                         None)
 
                     if tracked_order is not None:
-                        new_state = CONSTANTS.ORDER_STATE[order_update.get("st")]
+                        new_state = CONSTANTS.ORDER_STATE[order_data.get("st")]
                         
                         # Trigger fill fetch for FILLED or PARTIALLY_FILLED orders
                         if new_state in [OrderState.FILLED, OrderState.PARTIALLY_FILLED]:
@@ -400,14 +400,14 @@ class XtExchange(ExchangePyBase):
                                 safe_ensure_future(self._fetch_fills_for_order(tracked_order))
 
                         if new_state == OrderState.CANCELED:
-                            await self._cancelled_order_handler(tracked_order.client_order_id, order_update)
+                            await self._cancelled_order_handler(tracked_order.client_order_id, order_data)
 
                         order_update = OrderUpdate(
                             trading_pair=tracked_order.trading_pair,
-                            update_timestamp=(order_update["t"] * 1e-3) if "t" in order_update and order_update["t"] is not None else None,
+                            update_timestamp=(order_data["t"] * 1e-3) if "t" in order_data and order_data["t"] is not None else None,
                             new_state=new_state,
                             client_order_id=tracked_order.client_order_id,
-                            exchange_order_id=str(order_update["i"]),
+                            exchange_order_id=str(order_data["i"]),
                         )
                         self._order_tracker.process_order_update(order_update=order_update)
 
@@ -443,6 +443,13 @@ class XtExchange(ExchangePyBase):
             oid: timestamp 
             for oid, timestamp in self._ws_order_updates.items()
             if current_time - timestamp < 300
+        }
+        
+        # Clean up fill triggers for completed orders
+        active_order_ids = set(all_orders.keys())
+        self._ws_order_fills_triggered = {
+            fill_key for fill_key in self._ws_order_fills_triggered
+            if any(fill_key.startswith(oid) for oid in active_order_ids)
         }
         
         for client_order_id, order in all_orders.items():
