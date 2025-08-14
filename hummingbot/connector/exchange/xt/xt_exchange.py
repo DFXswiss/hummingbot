@@ -20,7 +20,7 @@ from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState,
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
-from hummingbot.core.utils.async_utils import safe_gather
+from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
@@ -31,10 +31,10 @@ s_logger = None
 
 
 class XtExchange(ExchangePyBase):
-    # XT depends on REST API to get trade fills
-    # keeping short/long poll intervals 1 second to poll regularly for trade updates.
-    SHORT_POLL_INTERVAL = 1.0
-    LONG_POLL_INTERVAL = 1.0
+    # Optimized polling intervals - WebSocket handles real-time updates
+    # REST polling is now just a fallback for orders without WebSocket updates
+    SHORT_POLL_INTERVAL = 5.0   # Reduced from 1.0 - for active orders
+    LONG_POLL_INTERVAL = 10.0   # Reduced from 1.0 - for general status checks
 
     web_utils = web_utils
 
@@ -51,6 +51,18 @@ class XtExchange(ExchangePyBase):
         self._domain = domain
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
+        
+        # WebSocket optimization: Track order updates and fill fetches
+        self._ws_order_updates = {}  # {client_order_id: timestamp}
+        self._ws_order_fills_triggered = set()  # Prevent duplicate fill fetches
+        self._performance_metrics = {
+            "ws_updates_received": 0,
+            "rest_polls_executed": 0,
+            "rest_polls_skipped": 0,
+            "fill_fetches_triggered": 0,
+            "last_reset": 0
+        }
+        
         super().__init__(client_config_map)
 
     @staticmethod
@@ -359,20 +371,41 @@ class XtExchange(ExchangePyBase):
                 if event_type == "order":
                     order_update = event_message.get("data")
                     client_order_id = order_update.get("ci")
+                    
+                    # Track WebSocket order update
+                    if client_order_id:
+                        self._ws_order_updates[client_order_id] = self.current_timestamp
+                        self._performance_metrics["ws_updates_received"] += 1
+                        self.logger().debug(
+                            f"WS order update for {client_order_id}: {order_update.get('st')} "
+                            f"(Total WS updates: {self._performance_metrics['ws_updates_received']})"
+                        )
 
                     tracked_order = next(
                         (order for order in self._order_tracker.all_updatable_orders.values() if order.client_order_id == client_order_id),
                         None)
 
                     if tracked_order is not None:
+                        new_state = CONSTANTS.ORDER_STATE[order_update.get("st")]
+                        
+                        # Trigger fill fetch for FILLED or PARTIALLY_FILLED orders
+                        if new_state in [OrderState.FILLED, OrderState.PARTIALLY_FILLED]:
+                            fill_key = f"{client_order_id}_{new_state}"
+                            if fill_key not in self._ws_order_fills_triggered:
+                                self._ws_order_fills_triggered.add(fill_key)
+                                self._performance_metrics["fill_fetches_triggered"] += 1
+                                self.logger().info(
+                                    f"Triggering fill fetch for {client_order_id} with state {new_state}"
+                                )
+                                safe_ensure_future(self._fetch_fills_for_order(tracked_order))
 
-                        if CONSTANTS.ORDER_STATE[order_update.get("st")] == OrderState.CANCELED:
+                        if new_state == OrderState.CANCELED:
                             await self._cancelled_order_handler(tracked_order.client_order_id, order_update)
 
                         order_update = OrderUpdate(
                             trading_pair=tracked_order.trading_pair,
                             update_timestamp=(order_update["t"] * 1e-3) if "t" in order_update and order_update["t"] is not None else None,
-                            new_state=CONSTANTS.ORDER_STATE[order_update["st"]],
+                            new_state=new_state,
                             client_order_id=tracked_order.client_order_id,
                             exchange_order_id=str(order_update["i"]),
                         )
@@ -394,9 +427,54 @@ class XtExchange(ExchangePyBase):
                 await self._sleep(5.0)
 
     async def _update_orders(self):
-        orders_to_update = self.in_flight_orders.copy()
-        for client_order_id, order in orders_to_update.items():
+        """
+        Optimized: Only poll orders without recent WebSocket updates
+        """
+        current_time = self.current_timestamp
+        all_orders = self.in_flight_orders.copy()
+        orders_to_poll = {}
+        
+        # Stats for monitoring
+        ws_updated = 0
+        needs_polling = 0
+        
+        # Clean up old WebSocket update records (older than 5 minutes)
+        self._ws_order_updates = {
+            oid: timestamp 
+            for oid, timestamp in self._ws_order_updates.items()
+            if current_time - timestamp < 300
+        }
+        
+        for client_order_id, order in all_orders.items():
+            last_ws_update = self._ws_order_updates.get(client_order_id, 0)
+            time_since_update = current_time - last_ws_update
+            
+            if last_ws_update == 0:
+                # Never received a WebSocket update for this order
+                orders_to_poll[client_order_id] = order
+                needs_polling += 1
+                self.logger().debug(f"{client_order_id}: No WS update ever received")
+            elif time_since_update > 30:
+                # WebSocket update is too old (> 30 seconds)
+                orders_to_poll[client_order_id] = order
+                needs_polling += 1
+                self.logger().debug(f"{client_order_id}: WS update {time_since_update:.1f}s old")
+            else:
+                # Fresh WebSocket update available, skip REST polling
+                ws_updated += 1
+                self._performance_metrics["rest_polls_skipped"] += 1
+        
+        # Log performance metrics
+        if len(all_orders) > 0:
+            self.logger().info(
+                f"Order update stats: {ws_updated} via WS (skipped), {needs_polling} need polling "
+                f"(Total orders: {len(all_orders)})"
+            )
+        
+        # Only poll orders without recent WebSocket updates
+        for client_order_id, order in orders_to_poll.items():
             try:
+                self._performance_metrics["rest_polls_executed"] += 1
                 order_update = await self._request_order_status(tracked_order=order)
                 if client_order_id in self.in_flight_orders and order_update is not None:
                     self._order_tracker.process_order_update(order_update)
@@ -415,6 +493,39 @@ class XtExchange(ExchangePyBase):
                 )
                 await self._order_tracker.process_order_not_found(order.client_order_id)
 
+    async def _fetch_fills_for_order(self, order: InFlightOrder):
+        """
+        Event-triggered trade fill fetching for FILLED/PARTIALLY_FILLED orders.
+        Called from WebSocket handler to avoid continuous polling.
+        """
+        try:
+            # Prevent duplicate fetch attempts
+            if hasattr(order, '_fetching_fills') and order._fetching_fills:
+                self.logger().debug(f"Already fetching fills for {order.client_order_id}, skipping")
+                return
+            
+            order._fetching_fills = True
+            self.logger().debug(f"Fetching trade fills for {order.client_order_id}")
+            
+            trade_updates = await self._all_trade_updates_for_order(order)
+            
+            if trade_updates:
+                self.logger().info(
+                    f"Got {len(trade_updates)} trade fills for {order.client_order_id}"
+                )
+                for trade_update in trade_updates:
+                    self._order_tracker.process_trade_update(trade_update)
+            else:
+                self.logger().debug(f"No trade fills found for {order.client_order_id}")
+                
+        except Exception as e:
+            self.logger().error(
+                f"Failed to fetch trade fills for {order.client_order_id}: {e}",
+                exc_info=True
+            )
+        finally:
+            order._fetching_fills = False
+    
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
 
@@ -571,3 +682,57 @@ class XtExchange(ExchangePyBase):
                     open_orders.append(order["clientOrderId"])
 
         return open_orders
+    
+    async def _log_performance_metrics(self):
+        """
+        Periodically log performance metrics to monitor WebSocket optimization effectiveness.
+        This helps track the reduction in REST API calls and overall performance improvement.
+        """
+        while True:
+            await self._sleep(60)  # Log metrics every 60 seconds
+            
+            if self._performance_metrics["last_reset"] == 0:
+                self._performance_metrics["last_reset"] = self.current_timestamp
+            
+            time_since_reset = self.current_timestamp - self._performance_metrics["last_reset"]
+            
+            if time_since_reset > 0:
+                # Calculate rates
+                ws_rate = self._performance_metrics["ws_updates_received"] / (time_since_reset / 60)
+                rest_rate = self._performance_metrics["rest_polls_executed"] / (time_since_reset / 60)
+                skip_rate = self._performance_metrics["rest_polls_skipped"] / (time_since_reset / 60)
+                
+                # Calculate efficiency
+                total_potential_polls = self._performance_metrics["rest_polls_executed"] + self._performance_metrics["rest_polls_skipped"]
+                efficiency_pct = (self._performance_metrics["rest_polls_skipped"] / total_potential_polls * 100) if total_potential_polls > 0 else 0
+                
+                self.logger().info(
+                    f"XT Performance Metrics (last {time_since_reset:.0f}s): "
+                    f"WS updates: {self._performance_metrics['ws_updates_received']} ({ws_rate:.1f}/min), "
+                    f"REST polls executed: {self._performance_metrics['rest_polls_executed']} ({rest_rate:.1f}/min), "
+                    f"REST polls skipped: {self._performance_metrics['rest_polls_skipped']} ({skip_rate:.1f}/min), "
+                    f"Fill fetches: {self._performance_metrics['fill_fetches_triggered']}, "
+                    f"Efficiency: {efficiency_pct:.1f}% REST calls avoided"
+                )
+                
+                # Reset metrics every hour to avoid overflow
+                if time_since_reset > 3600:
+                    self._performance_metrics = {
+                        "ws_updates_received": 0,
+                        "rest_polls_executed": 0,
+                        "rest_polls_skipped": 0,
+                        "fill_fetches_triggered": 0,
+                        "last_reset": self.current_timestamp
+                    }
+    
+    async def start_network(self):
+        """
+        Override parent start_network to add performance metrics logging task.
+        """
+        await super().start_network()
+        
+        # Start performance metrics logging
+        if self._trading_required:
+            self._performance_metrics["last_reset"] = self.current_timestamp
+            safe_ensure_future(self._log_performance_metrics())
+            self.logger().info("XT WebSocket optimization enabled - Performance metrics logging started")
