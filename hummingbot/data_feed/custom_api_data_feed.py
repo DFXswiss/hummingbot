@@ -9,7 +9,9 @@ from hummingbot.core.network_base import NetworkBase
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.logger import HummingbotLogger
-from hummingbot.strategy.pure_market_making.pure_market_making_config_map import pure_market_making_config_map as c_map
+from hummingbot.strategy.custom_market_making.custom_market_making_config_map import (
+    custom_market_making_config_map as c_map,
+)
 
 
 class CustomAPIDataFeed(NetworkBase):
@@ -96,7 +98,6 @@ class CustomAPIDataFeed(NetworkBase):
                 raise Exception(f"Custom API Feed {self.name} server error: {resp_text}")
 
             try:
-
                 market = c_map.get("price_source_market").value.lower()
                 price_source_custom_api = c_map.get("price_source_custom_api").value
                 invert_custom_api_price = c_map.get("invert_custom_api_price").value
@@ -120,7 +121,6 @@ class CustomAPIDataFeed(NetworkBase):
                     raw_price = Decimal(str(data[base_coin_id][quote_coin_id]))
 
                 elif "api.deuro.com" in price_source_custom_api:
-
                     data = await resp.json()
 
                     pair_parts = market.split("-")
@@ -139,7 +139,6 @@ class CustomAPIDataFeed(NetworkBase):
 
                 else:
                     # Default Parser - simple decimal from response text
-
                     resp_text = await resp.text()
                     raw_price = Decimal(str(resp_text))
 
