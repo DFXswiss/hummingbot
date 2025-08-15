@@ -1403,29 +1403,61 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                             key=lambda x: x.price)
         
         # Find which buy orders need to be created
-        existing_buy_prices = set([o.price for o in active_buys])
+        # Use same logic as c_cancel_active_orders: find closest existing order for each proposal
+        used_buy_orders = set()  # Track which existing orders are already matched
+        
         for buy in proposal.buys:
-            # Check if an order at this price already exists (within tolerance)
-            price_exists = False
-            if buy.price > 0:  # Protect against division by zero
-                for existing_price in existing_buy_prices:
-                    if abs(existing_price - buy.price) / buy.price <= self._order_refresh_tolerance_pct:
-                        price_exists = True
-                        break
-            if not price_exists:
+            # Find the closest existing order to this proposal (that hasn't been used yet)
+            min_diff = Decimal("999999")
+            closest_existing = None
+            
+            for active_buy in active_buys:
+                if active_buy not in used_buy_orders:
+                    diff = abs(active_buy.price - buy.price)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_existing = active_buy
+            
+            # Check if closest existing order is within tolerance (same logic as cancel)
+            if closest_existing and buy.price > 0:  # Protect against division by zero
+                price_diff = min_diff / buy.price
+                if price_diff <= self._order_refresh_tolerance_pct:
+                    # Existing order within tolerance, mark as used
+                    used_buy_orders.add(closest_existing)
+                else:
+                    # No existing order within tolerance, need to create
+                    buys_to_create.append(buy)
+            else:
+                # No existing order at all, need to create
                 buys_to_create.append(buy)
         
         # Find which sell orders need to be created
-        existing_sell_prices = set([o.price for o in active_sells])
+        # Use same logic as c_cancel_active_orders: find closest existing order for each proposal
+        used_sell_orders = set()  # Track which existing orders are already matched
+        
         for sell in proposal.sells:
-            # Check if an order at this price already exists (within tolerance)
-            price_exists = False
-            if sell.price > 0:  # Protect against division by zero
-                for existing_price in existing_sell_prices:
-                    if abs(existing_price - sell.price) / sell.price <= self._order_refresh_tolerance_pct:
-                        price_exists = True
-                        break
-            if not price_exists:
+            # Find the closest existing order to this proposal (that hasn't been used yet)
+            min_diff = Decimal("999999")
+            closest_existing = None
+            
+            for active_sell in active_sells:
+                if active_sell not in used_sell_orders:
+                    diff = abs(active_sell.price - sell.price)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_existing = active_sell
+            
+            # Check if closest existing order is within tolerance (same logic as cancel)
+            if closest_existing and sell.price > 0:  # Protect against division by zero
+                price_diff = min_diff / sell.price
+                if price_diff <= self._order_refresh_tolerance_pct:
+                    # Existing order within tolerance, mark as used
+                    used_sell_orders.add(closest_existing)
+                else:
+                    # No existing order within tolerance, need to create
+                    sells_to_create.append(sell)
+            else:
+                # No existing order at all, need to create
                 sells_to_create.append(sell)
         
         # Number of pair of orders to track for hanging orders
