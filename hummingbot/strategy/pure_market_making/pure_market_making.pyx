@@ -1242,151 +1242,52 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             proposal_buys = sorted(proposal.buys, key=lambda x: x.price, reverse=True)
             proposal_sells = sorted(proposal.sells, key=lambda x: x.price)
             
-            # Identify critical orders (closest to mid price) that we want to keep if possible
-            # Sort by distance from current price, not by absolute price
-            if current_price and current_price > 0 and len(active_buys) > 0:
-                # Sort buy orders by distance from mid price (closest first)
-                active_buys_by_distance = sorted(active_buys, 
-                                                key=lambda x: abs(x.price - current_price))
-                critical_orders_buy = active_buys_by_distance[:min(min_orders_to_keep, len(active_buys_by_distance))]
-            elif len(active_buys) > 0:
-                # Fallback: use highest buy prices if current_price not available
-                critical_orders_buy = active_buys[:min(min_orders_to_keep, len(active_buys))]
+            # Find orders to cancel - check tolerance and count limits simultaneously
+            buys_to_cancel = []
+            sells_to_cancel = []
             
-            if current_price and current_price > 0 and len(active_sells) > 0:
-                # Sort sell orders by distance from mid price (closest first)
-                active_sells_by_distance = sorted(active_sells, 
-                                                 key=lambda x: abs(x.price - current_price))
-                critical_orders_sell = active_sells_by_distance[:min(min_orders_to_keep, len(active_sells_by_distance))]
-            elif len(active_sells) > 0:
-                # Fallback: use lowest sell prices if current_price not available
-                critical_orders_sell = active_sells[:min(min_orders_to_keep, len(active_sells))]
-            
-            # For buy orders - check each active order against proposal
-            for order in active_buys:
-                should_cancel = False
-                is_critical = order in critical_orders_buy
-                
-                # Find the closest proposal price
-                min_diff = Decimal("999999")
-                closest_proposal = None
-                
-                for proposal_buy in proposal_buys:
-                    diff = abs(order.price - proposal_buy.price)
-                    if diff < min_diff:
-                        min_diff = diff
-                        closest_proposal = proposal_buy
-                
-                if closest_proposal and closest_proposal.price > 0:
-                    # Use stricter tolerance for critical orders (3x normal tolerance)
-                    tolerance_to_use = self._order_refresh_tolerance_pct * 3 if is_critical else self._order_refresh_tolerance_pct
-                    price_diff = min_diff / closest_proposal.price
-                    if price_diff > tolerance_to_use:
-                        should_cancel = True
-                elif not is_critical:
-                    # Non-critical order with no matching proposal
-                    should_cancel = True
-                    
-                if should_cancel:
-                    orders_to_cancel.append(order)
-            
-            # For sell orders - check each active order against proposal
-            for order in active_sells:
-                should_cancel = False
-                is_critical = order in critical_orders_sell
-                
-                # Find the closest proposal price
-                min_diff = Decimal("999999")
-                closest_proposal = None
-                
-                for proposal_sell in proposal_sells:
-                    diff = abs(order.price - proposal_sell.price)
-                    if diff < min_diff:
-                        min_diff = diff
-                        closest_proposal = proposal_sell
-                
-                if closest_proposal and closest_proposal.price > 0:
-                    # Use stricter tolerance for critical orders (3x normal tolerance)
-                    tolerance_to_use = self._order_refresh_tolerance_pct * 3 if is_critical else self._order_refresh_tolerance_pct
-                    price_diff = min_diff / closest_proposal.price
-                    if price_diff > tolerance_to_use:
-                        should_cancel = True
-                elif not is_critical:
-                    # Non-critical order with no matching proposal
-                    should_cancel = True
-                    
-                if should_cancel:
-                    orders_to_cancel.append(order)
-            
-            # Ensure we never cancel all orders - always keep minimum on each side
-            if len(orders_to_cancel) > 0:
-                # Calculate how many we can safely cancel
-                remaining_buys = len([o for o in active_buys if o not in orders_to_cancel])
-                remaining_sells = len([o for o in active_sells if o not in orders_to_cancel])
-                
-                # Sort orders to cancel by distance from mid price (cancel furthest first)
-                if current_price and current_price > 0:
-                    orders_to_cancel.sort(key=lambda x: abs(x.price - current_price), reverse=True)
-                
-                # Only cancel orders if we'll still have minimum coverage
-                safe_to_cancel = []
-                for order in orders_to_cancel:
-                    if order.is_buy:
-                        if remaining_buys > min_orders_to_keep:
-                            safe_to_cancel.append(order)
-                            remaining_buys -= 1
+            for orders, proposals, orders_list in [
+                (active_buys, proposal_buys, buys_to_cancel),
+                (active_sells, proposal_sells, sells_to_cancel)
+            ]:
+                for order in orders:
+                    # Skip if we're already at minimum
+                    remaining_count = len(orders) - len(orders_list)
+                    if remaining_count <= min_orders_to_keep:
+                        break
+                        
+                    # Find closest proposal and check tolerance
+                    if proposals:
+                        min_diff = min([abs(order.price - p.price) for p in proposals])
+                        closest_proposal = min(proposals, key=lambda p: abs(order.price - p.price))
+                        if closest_proposal.price > 0:
+                            if min_diff / closest_proposal.price > self._order_refresh_tolerance_pct:
+                                orders_list.append(order)
                     else:
-                        if remaining_sells > min_orders_to_keep:
-                            safe_to_cancel.append(order)
-                            remaining_sells -= 1
-                
-                if len(safe_to_cancel) > 0:
-                    if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
-                        self.logger().info(
-                            f"Safely cancelling {len(safe_to_cancel)} of {len(active_orders)} orders "
-                            f"(keeping minimum {min_orders_to_keep} per side, "
-                            f"tolerance: {self._order_refresh_tolerance_pct:.2%})"
-                        )
-                    self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-                    for order in safe_to_cancel:
-                        if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                            self.c_cancel_order(self._market_info, order.client_order_id)
+                        orders_list.append(order)
+            
+            # Cancel the identified orders
+            orders_to_cancel = buys_to_cancel + sells_to_cancel
+            if orders_to_cancel and self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
+                self.logger().info(f"Cancelling {len(orders_to_cancel)} orders outside tolerance")
+            
+            self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
+            for order in orders_to_cancel:
+                if not self._hanging_orders_tracker.is_potential_hanging_order(order):
+                    self.c_cancel_order(self._market_info, order.client_order_id)
         else:
-            # When tolerance checking is disabled, still maintain minimum orders
-            active_buys = [o for o in active_orders if o.is_buy]
-            active_sells = [o for o in active_orders if not o.is_buy]
-            
-            # Never cancel all orders - use staggered cancellation
+            # When tolerance disabled: cancel excess orders, keep minimum
             orders_to_cancel = []
+            for orders in [[o for o in active_orders if o.is_buy], [o for o in active_orders if not o.is_buy]]:
+                if len(orders) > min_orders_to_keep:
+                    # Sort to keep best orders (closest to current price if available, else by price)
+                    if current_price and current_price > 0:
+                        orders.sort(key=lambda x: abs(x.price - current_price))
+                    else:
+                        orders.sort(key=lambda x: x.price, reverse=orders[0].is_buy)
+                    orders_to_cancel.extend(orders[min_orders_to_keep:])
             
-            # Keep minimum orders on each side (closest to mid price)
-            if current_price and current_price > 0:
-                active_buys.sort(key=lambda x: abs(x.price - current_price))
-                active_sells.sort(key=lambda x: abs(x.price - current_price))
-                
-                # Only cancel orders beyond the minimum threshold (furthest from mid price)
-                if len(active_buys) > min_orders_to_keep:
-                    orders_to_cancel.extend(active_buys[min_orders_to_keep:])
-                if len(active_sells) > min_orders_to_keep:
-                    orders_to_cancel.extend(active_sells[min_orders_to_keep:])
-            else:
-                # Fallback if current_price not available: keep best prices
-                # For buys: keep highest prices (closest to market)
-                active_buys.sort(key=lambda x: x.price, reverse=True)
-                # For sells: keep lowest prices (closest to market)
-                active_sells.sort(key=lambda x: x.price)
-                
-                # Only cancel orders beyond the minimum threshold
-                if len(active_buys) > min_orders_to_keep:
-                    orders_to_cancel.extend(active_buys[min_orders_to_keep:])
-                if len(active_sells) > min_orders_to_keep:
-                    orders_to_cancel.extend(active_sells[min_orders_to_keep:])
-            
-            if len(orders_to_cancel) > 0:
-                if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
-                    self.logger().info(
-                        f"Cancelling {len(orders_to_cancel)} orders while keeping minimum {min_orders_to_keep} per side"
-                    )
+            if orders_to_cancel:
                 self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
                 for order in orders_to_cancel:
                     if not self._hanging_orders_tracker.is_potential_hanging_order(order):
@@ -1437,63 +1338,21 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         active_sells = sorted([o for o in non_hanging_orders if not o.is_buy], 
                             key=lambda x: x.price)
         
-        # Find which buy orders need to be created
-        # Use same logic as c_cancel_active_orders: find closest existing order for each proposal
-        used_buy_orders = set()  # Track which existing orders are already matched
-        
-        for buy in proposal.buys:
-            # Find the closest existing order to this proposal (that hasn't been used yet)
-            min_diff = Decimal("999999")
-            closest_existing = None
-            
-            for active_buy in active_buys:
-                if active_buy not in used_buy_orders:
-                    diff = abs(active_buy.price - buy.price)
-                    if diff < min_diff:
-                        min_diff = diff
-                        closest_existing = active_buy
-            
-            # Check if closest existing order is within tolerance (same logic as cancel)
-            if closest_existing and buy.price > 0:  # Protect against division by zero
-                price_diff = min_diff / buy.price
-                if price_diff <= self._order_refresh_tolerance_pct:
-                    # Existing order within tolerance, mark as used
-                    used_buy_orders.add(closest_existing)
-                else:
-                    # No existing order within tolerance, need to create
-                    buys_to_create.append(buy)
-            else:
-                # No existing order at all, need to create
-                buys_to_create.append(buy)
-        
-        # Find which sell orders need to be created
-        # Use same logic as c_cancel_active_orders: find closest existing order for each proposal
-        used_sell_orders = set()  # Track which existing orders are already matched
-        
-        for sell in proposal.sells:
-            # Find the closest existing order to this proposal (that hasn't been used yet)
-            min_diff = Decimal("999999")
-            closest_existing = None
-            
-            for active_sell in active_sells:
-                if active_sell not in used_sell_orders:
-                    diff = abs(active_sell.price - sell.price)
-                    if diff < min_diff:
-                        min_diff = diff
-                        closest_existing = active_sell
-            
-            # Check if closest existing order is within tolerance (same logic as cancel)
-            if closest_existing and sell.price > 0:  # Protect against division by zero
-                price_diff = min_diff / sell.price
-                if price_diff <= self._order_refresh_tolerance_pct:
-                    # Existing order within tolerance, mark as used
-                    used_sell_orders.add(closest_existing)
-                else:
-                    # No existing order within tolerance, need to create
-                    sells_to_create.append(sell)
-            else:
-                # No existing order at all, need to create
-                sells_to_create.append(sell)
+        # Find which orders need to be created using same logic as cancel
+        for proposals, active_orders, orders_to_create in [
+            (proposal.buys, active_buys, buys_to_create),
+            (proposal.sells, active_sells, sells_to_create)
+        ]:
+            used_orders = set()
+            for prop in proposals:
+                available_orders = [o for o in active_orders if o not in used_orders]
+                if available_orders and prop.price > 0:
+                    closest = min(available_orders, key=lambda o: abs(o.price - prop.price))
+                    min_diff = abs(closest.price - prop.price)
+                    if min_diff / prop.price <= self._order_refresh_tolerance_pct:
+                        used_orders.add(closest)
+                        continue
+                orders_to_create.append(prop)
         
         # Number of pair of orders to track for hanging orders
         number_of_pairs = min((len(buys_to_create), len(sells_to_create))) if self._hanging_orders_enabled else 0
