@@ -1233,9 +1233,23 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             proposal_sells = sorted(proposal.sells, key=lambda x: x.price)
             
             # Identify critical orders (closest to mid price) that we want to keep if possible
-            if len(active_buys) > 0:
+            # Sort by distance from current price, not by absolute price
+            if current_price and current_price > 0 and len(active_buys) > 0:
+                # Sort buy orders by distance from mid price (closest first)
+                active_buys_by_distance = sorted(active_buys, 
+                                                key=lambda x: abs(x.price - current_price))
+                critical_orders_buy = active_buys_by_distance[:min(min_orders_to_keep, len(active_buys_by_distance))]
+            elif len(active_buys) > 0:
+                # Fallback: use highest buy prices if current_price not available
                 critical_orders_buy = active_buys[:min(min_orders_to_keep, len(active_buys))]
-            if len(active_sells) > 0:
+            
+            if current_price and current_price > 0 and len(active_sells) > 0:
+                # Sort sell orders by distance from mid price (closest first)
+                active_sells_by_distance = sorted(active_sells, 
+                                                 key=lambda x: abs(x.price - current_price))
+                critical_orders_sell = active_sells_by_distance[:min(min_orders_to_keep, len(active_sells_by_distance))]
+            elif len(active_sells) > 0:
+                # Fallback: use lowest sell prices if current_price not available
                 critical_orders_sell = active_sells[:min(min_orders_to_keep, len(active_sells))]
             
             # For buy orders - check each active order against proposal
@@ -1339,12 +1353,24 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             if current_price and current_price > 0:
                 active_buys.sort(key=lambda x: abs(x.price - current_price))
                 active_sells.sort(key=lambda x: abs(x.price - current_price))
-            
-            # Only cancel orders beyond the minimum threshold
-            if len(active_buys) > min_orders_to_keep:
-                orders_to_cancel.extend(active_buys[min_orders_to_keep:])
-            if len(active_sells) > min_orders_to_keep:
-                orders_to_cancel.extend(active_sells[min_orders_to_keep:])
+                
+                # Only cancel orders beyond the minimum threshold (furthest from mid price)
+                if len(active_buys) > min_orders_to_keep:
+                    orders_to_cancel.extend(active_buys[min_orders_to_keep:])
+                if len(active_sells) > min_orders_to_keep:
+                    orders_to_cancel.extend(active_sells[min_orders_to_keep:])
+            else:
+                # Fallback if current_price not available: keep best prices
+                # For buys: keep highest prices (closest to market)
+                active_buys.sort(key=lambda x: x.price, reverse=True)
+                # For sells: keep lowest prices (closest to market)
+                active_sells.sort(key=lambda x: x.price)
+                
+                # Only cancel orders beyond the minimum threshold
+                if len(active_buys) > min_orders_to_keep:
+                    orders_to_cancel.extend(active_buys[min_orders_to_keep:])
+                if len(active_sells) > min_orders_to_keep:
+                    orders_to_cancel.extend(active_sells[min_orders_to_keep:])
             
             if len(orders_to_cancel) > 0:
                 if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
