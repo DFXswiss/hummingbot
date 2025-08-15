@@ -1254,9 +1254,9 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                         
                     # Find closest proposal and check tolerance
                     if proposals:
-                        min_diff = min([abs(order.price - p.price) for p in proposals])
                         closest_proposal = min(proposals, key=lambda p: abs(order.price - p.price))
                         if closest_proposal.price > 0:
+                            min_diff = abs(order.price - closest_proposal.price)
                             if min_diff / closest_proposal.price > self._order_refresh_tolerance_pct:
                                 orders_list.append(order)
                     else:
