@@ -1355,7 +1355,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                 if available_orders and prop.price > 0:
                     closest = min(available_orders, key=lambda o: abs(o.price - prop.price))
                     min_diff = abs(closest.price - prop.price)
-                    if min_diff / prop.price <= self._order_refresh_tolerance_pct:
+                    if closest.price > 0 and min_diff / prop.price <= self._order_refresh_tolerance_pct:
                         used_orders.add(closest)
                         continue
                 orders_to_create.append(prop)
