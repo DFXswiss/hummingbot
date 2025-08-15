@@ -1222,70 +1222,54 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             return
             
         if proposal is not None and self._order_refresh_tolerance_pct >= 0:
-            # Check each order individually against its expected price
-            for order in active_orders:
-                should_cancel = False
-                
-                if order.is_buy:
-                    # Find the expected price for this buy order based on its position
-                    proposal_buys = sorted(proposal.buys, key=lambda x: x.price, reverse=True)
-                    
-                    # Try to match this order to a proposal level
-                    best_match_idx = -1
-                    min_price_diff = Decimal("999999")
-                    
-                    for i, buy in enumerate(proposal_buys):
-                        diff = abs(order.price - buy.price)
-                        if diff < min_price_diff:
-                            min_price_diff = diff
-                            best_match_idx = i
-                    
-                    if best_match_idx >= 0 and best_match_idx < len(proposal_buys):
-                        expected_price = proposal_buys[best_match_idx].price
-                        price_diff = abs(order.price - expected_price) / expected_price
-                        if price_diff > self._order_refresh_tolerance_pct:
-                            should_cancel = True
-                    else:
-                        # No matching level found, cancel the order
-                        should_cancel = True
-                        
-                else:  # sell order
-                    # Find the expected price for this sell order based on its position
-                    proposal_sells = sorted(proposal.sells, key=lambda x: x.price)
-                    
-                    # Try to match this order to a proposal level
-                    best_match_idx = -1
-                    min_price_diff = Decimal("999999")
-                    
-                    for i, sell in enumerate(proposal_sells):
-                        diff = abs(order.price - sell.price)
-                        if diff < min_price_diff:
-                            min_price_diff = diff
-                            best_match_idx = i
-                    
-                    if best_match_idx >= 0 and best_match_idx < len(proposal_sells):
-                        expected_price = proposal_sells[best_match_idx].price
-                        price_diff = abs(order.price - expected_price) / expected_price
-                        if price_diff > self._order_refresh_tolerance_pct:
-                            should_cancel = True
-                    else:
-                        # No matching level found, cancel the order
-                        should_cancel = True
-                
-                if should_cancel:
-                    orders_to_cancel.append(order)
+            # Sort active orders and proposals for proper comparison
+            active_buys = sorted([o for o in active_orders if o.is_buy], 
+                               key=lambda x: x.price, reverse=True)
+            active_sells = sorted([o for o in active_orders if not o.is_buy], 
+                                key=lambda x: x.price)
+            proposal_buys = sorted(proposal.buys, key=lambda x: x.price, reverse=True)
+            proposal_sells = sorted(proposal.sells, key=lambda x: x.price)
             
-            # Only cancel orders that are outside tolerance
-            if len(orders_to_cancel) > 0:
+            # Check if we have the right number of orders
+            # If orders are missing (e.g., after fills), we need to cancel all and recreate
+            if (len(active_buys) != len(proposal_buys) or 
+                len(active_sells) != len(proposal_sells)):
+                # Number mismatch - orders were filled or are missing
+                # Cancel all orders and let them be recreated
                 if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
                     self.logger().info(
-                        f"Cancelling {len(orders_to_cancel)} of {len(active_orders)} orders "
-                        f"that are outside {self._order_refresh_tolerance_pct:.2%} tolerance"
+                        f"Order count mismatch (active: {len(active_buys)}B/{len(active_sells)}S, "
+                        f"expected: {len(proposal_buys)}B/{len(proposal_sells)}S). Refreshing all orders."
                     )
                 self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-                for order in orders_to_cancel:
+                for order in active_orders:
                     if not self._hanging_orders_tracker.is_potential_hanging_order(order):
                         self.c_cancel_order(self._market_info, order.client_order_id)
+            else:
+                # Same number of orders - check each position individually
+                for i in range(len(active_buys)):
+                    if i < len(proposal_buys):
+                        price_diff = abs(active_buys[i].price - proposal_buys[i].price) / proposal_buys[i].price
+                        if price_diff > self._order_refresh_tolerance_pct:
+                            orders_to_cancel.append(active_buys[i])
+                
+                for i in range(len(active_sells)):
+                    if i < len(proposal_sells):
+                        price_diff = abs(active_sells[i].price - proposal_sells[i].price) / proposal_sells[i].price
+                        if price_diff > self._order_refresh_tolerance_pct:
+                            orders_to_cancel.append(active_sells[i])
+                
+                # Only cancel orders that are outside tolerance
+                if len(orders_to_cancel) > 0:
+                    if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
+                        self.logger().info(
+                            f"Cancelling {len(orders_to_cancel)} of {len(active_orders)} orders "
+                            f"that are outside {self._order_refresh_tolerance_pct:.2%} tolerance"
+                        )
+                    self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
+                    for order in orders_to_cancel:
+                        if not self._hanging_orders_tracker.is_potential_hanging_order(order):
+                            self.c_cancel_order(self._market_info, order.client_order_id)
         else:
             # Original behavior when tolerance checking is disabled
             self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
