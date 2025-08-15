@@ -1407,10 +1407,11 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         for buy in proposal.buys:
             # Check if an order at this price already exists (within tolerance)
             price_exists = False
-            for existing_price in existing_buy_prices:
-                if abs(existing_price - buy.price) / buy.price <= self._order_refresh_tolerance_pct:
-                    price_exists = True
-                    break
+            if buy.price > 0:  # Protect against division by zero
+                for existing_price in existing_buy_prices:
+                    if abs(existing_price - buy.price) / buy.price <= self._order_refresh_tolerance_pct:
+                        price_exists = True
+                        break
             if not price_exists:
                 buys_to_create.append(buy)
         
@@ -1419,10 +1420,11 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         for sell in proposal.sells:
             # Check if an order at this price already exists (within tolerance)
             price_exists = False
-            for existing_price in existing_sell_prices:
-                if abs(existing_price - sell.price) / sell.price <= self._order_refresh_tolerance_pct:
-                    price_exists = True
-                    break
+            if sell.price > 0:  # Protect against division by zero
+                for existing_price in existing_sell_prices:
+                    if abs(existing_price - sell.price) / sell.price <= self._order_refresh_tolerance_pct:
+                        price_exists = True
+                        break
             if not price_exists:
                 sells_to_create.append(sell)
         
