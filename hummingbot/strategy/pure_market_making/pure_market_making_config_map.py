@@ -181,7 +181,7 @@ pure_market_making_config_map = {
                          "(Enter 5 for 5 orders per side) >>> ",
                   type_str="int",
                   default=5,
-                  validator=lambda v: validate_decimal(v, 1, 100, inclusive=True)),
+                  validator=lambda v: validate_int(v, min_value=1, max_value=100)),
     "order_amount":
         ConfigVar(key="order_amount",
                   prompt=order_amount_prompt,

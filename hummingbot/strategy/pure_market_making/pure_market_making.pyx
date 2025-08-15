@@ -1274,16 +1274,24 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         else:
             # When tolerance disabled: cancel excess orders, keep minimum
             orders_to_cancel = []
-            for orders in [[o for o in active_orders if o.is_buy], [o for o in active_orders if not o.is_buy]]:
-                if len(orders) > min_orders_to_keep:
-                    # Sort to keep best orders (closest to current price if available, else by price)
-                    if current_price and current_price > 0:
-                        orders.sort(key=lambda x: abs(x.price - current_price))
-                    else:
-                        # For buys: keep highest prices, for sells: keep lowest prices
-                        is_buy = orders[0].is_buy if orders else True
-                        orders.sort(key=lambda x: x.price, reverse=is_buy)
-                    orders_to_cancel.extend(orders[min_orders_to_keep:])
+            
+            # Handle buy orders
+            buy_orders = [o for o in active_orders if o.is_buy]
+            if len(buy_orders) > min_orders_to_keep:
+                if current_price and current_price > 0:
+                    buy_orders.sort(key=lambda x: abs(x.price - current_price))
+                else:
+                    buy_orders.sort(key=lambda x: x.price, reverse=True)  # Keep highest buy prices
+                orders_to_cancel.extend(buy_orders[min_orders_to_keep:])
+            
+            # Handle sell orders  
+            sell_orders = [o for o in active_orders if not o.is_buy]
+            if len(sell_orders) > min_orders_to_keep:
+                if current_price and current_price > 0:
+                    sell_orders.sort(key=lambda x: abs(x.price - current_price))
+                else:
+                    sell_orders.sort(key=lambda x: x.price)  # Keep lowest sell prices
+                orders_to_cancel.extend(sell_orders[min_orders_to_keep:])
             
             if orders_to_cancel:
                 self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
