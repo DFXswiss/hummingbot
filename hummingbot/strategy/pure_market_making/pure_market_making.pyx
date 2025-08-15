@@ -1230,46 +1230,66 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             proposal_buys = sorted(proposal.buys, key=lambda x: x.price, reverse=True)
             proposal_sells = sorted(proposal.sells, key=lambda x: x.price)
             
-            # Check if we have the right number of orders
-            # If orders are missing (e.g., after fills), we need to cancel all and recreate
-            if (len(active_buys) != len(proposal_buys) or 
-                len(active_sells) != len(proposal_sells)):
-                # Number mismatch - orders were filled or are missing
-                # Cancel all orders and let them be recreated
+            # For buy orders - check each active order against proposal
+            for order in active_buys:
+                should_cancel = False
+                # Find the closest proposal price
+                min_diff = Decimal("999999")
+                closest_proposal = None
+                
+                for proposal_buy in proposal_buys:
+                    diff = abs(order.price - proposal_buy.price)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_proposal = proposal_buy
+                
+                if closest_proposal:
+                    # Check if this order is within tolerance of any expected price
+                    price_diff = min_diff / closest_proposal.price
+                    if price_diff > self._order_refresh_tolerance_pct:
+                        should_cancel = True
+                else:
+                    should_cancel = True
+                    
+                if should_cancel:
+                    orders_to_cancel.append(order)
+            
+            # For sell orders - check each active order against proposal
+            for order in active_sells:
+                should_cancel = False
+                # Find the closest proposal price
+                min_diff = Decimal("999999")
+                closest_proposal = None
+                
+                for proposal_sell in proposal_sells:
+                    diff = abs(order.price - proposal_sell.price)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_proposal = proposal_sell
+                
+                if closest_proposal:
+                    # Check if this order is within tolerance of any expected price
+                    price_diff = min_diff / closest_proposal.price
+                    if price_diff > self._order_refresh_tolerance_pct:
+                        should_cancel = True
+                else:
+                    should_cancel = True
+                    
+                if should_cancel:
+                    orders_to_cancel.append(order)
+            
+            # Only cancel orders that are outside tolerance
+            # Missing orders will be created by c_execute_orders_proposal later
+            if len(orders_to_cancel) > 0:
                 if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
                     self.logger().info(
-                        f"Order count mismatch (active: {len(active_buys)}B/{len(active_sells)}S, "
-                        f"expected: {len(proposal_buys)}B/{len(proposal_sells)}S). Refreshing all orders."
+                        f"Cancelling {len(orders_to_cancel)} of {len(active_orders)} orders "
+                        f"that are outside {self._order_refresh_tolerance_pct:.2%} tolerance"
                     )
                 self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-                for order in active_orders:
+                for order in orders_to_cancel:
                     if not self._hanging_orders_tracker.is_potential_hanging_order(order):
                         self.c_cancel_order(self._market_info, order.client_order_id)
-            else:
-                # Same number of orders - check each position individually
-                for i in range(len(active_buys)):
-                    if i < len(proposal_buys):
-                        price_diff = abs(active_buys[i].price - proposal_buys[i].price) / proposal_buys[i].price
-                        if price_diff > self._order_refresh_tolerance_pct:
-                            orders_to_cancel.append(active_buys[i])
-                
-                for i in range(len(active_sells)):
-                    if i < len(proposal_sells):
-                        price_diff = abs(active_sells[i].price - proposal_sells[i].price) / proposal_sells[i].price
-                        if price_diff > self._order_refresh_tolerance_pct:
-                            orders_to_cancel.append(active_sells[i])
-                
-                # Only cancel orders that are outside tolerance
-                if len(orders_to_cancel) > 0:
-                    if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
-                        self.logger().info(
-                            f"Cancelling {len(orders_to_cancel)} of {len(active_orders)} orders "
-                            f"that are outside {self._order_refresh_tolerance_pct:.2%} tolerance"
-                        )
-                    self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-                    for order in orders_to_cancel:
-                        if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                            self.c_cancel_order(self._market_info, order.client_order_id)
         else:
             # Original behavior when tolerance checking is disabled
             self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
@@ -1295,30 +1315,71 @@ cdef class PureMarketMakingStrategy(StrategyBase):
     cdef bint c_to_create_orders(self, object proposal):
         non_hanging_orders_non_cancelled = [o for o in self.active_non_hanging_orders if not
                                             self._hanging_orders_tracker.is_potential_hanging_order(o)]
+        # Changed: Create orders if we have fewer orders than expected, not just when all are gone
+        active_buys = [o for o in non_hanging_orders_non_cancelled if o.is_buy]
+        active_sells = [o for o in non_hanging_orders_non_cancelled if not o.is_buy]
+        
         return (self._create_timestamp < self._current_timestamp
                 and (not self._should_wait_order_cancel_confirmation or
                      len(self._sb_order_tracker.in_flight_cancels) == 0)
                 and proposal is not None
-                and len(non_hanging_orders_non_cancelled) == 0)
+                and (len(active_buys) < len(proposal.buys) or 
+                     len(active_sells) < len(proposal.sells)))
 
     cdef c_execute_orders_proposal(self, object proposal):
         cdef:
             double expiration_seconds = NaN
             str bid_order_id, ask_order_id
             bint orders_created = False
+            list active_buys, active_sells
+            list buys_to_create = []
+            list sells_to_create = []
+            
+        # Get current active orders
+        non_hanging_orders = [o for o in self.active_non_hanging_orders if not
+                              self._hanging_orders_tracker.is_potential_hanging_order(o)]
+        active_buys = sorted([o for o in non_hanging_orders if o.is_buy], 
+                           key=lambda x: x.price, reverse=True)
+        active_sells = sorted([o for o in non_hanging_orders if not o.is_buy], 
+                            key=lambda x: x.price)
+        
+        # Find which buy orders need to be created
+        existing_buy_prices = set([o.price for o in active_buys])
+        for buy in proposal.buys:
+            # Check if an order at this price already exists (within tolerance)
+            price_exists = False
+            for existing_price in existing_buy_prices:
+                if abs(existing_price - buy.price) / buy.price <= self._order_refresh_tolerance_pct:
+                    price_exists = True
+                    break
+            if not price_exists:
+                buys_to_create.append(buy)
+        
+        # Find which sell orders need to be created
+        existing_sell_prices = set([o.price for o in active_sells])
+        for sell in proposal.sells:
+            # Check if an order at this price already exists (within tolerance)
+            price_exists = False
+            for existing_price in existing_sell_prices:
+                if abs(existing_price - sell.price) / sell.price <= self._order_refresh_tolerance_pct:
+                    price_exists = True
+                    break
+            if not price_exists:
+                sells_to_create.append(sell)
+        
         # Number of pair of orders to track for hanging orders
-        number_of_pairs = min((len(proposal.buys), len(proposal.sells))) if self._hanging_orders_enabled else 0
+        number_of_pairs = min((len(buys_to_create), len(sells_to_create))) if self._hanging_orders_enabled else 0
 
-        if len(proposal.buys) > 0:
+        if len(buys_to_create) > 0:
             if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
                 price_quote_str = [f"{buy.size.normalize()} {self.base_asset}, "
                                    f"{buy.price.normalize()} {self.quote_asset}"
-                                   for buy in proposal.buys]
+                                   for buy in buys_to_create]
                 self.logger().info(
-                    f"({self.trading_pair}) Creating {len(proposal.buys)} bid orders "
+                    f"({self.trading_pair}) Creating {len(buys_to_create)} bid orders "
                     f"at (Size, Price): {price_quote_str}"
                 )
-            for idx, buy in enumerate(proposal.buys):
+            for idx, buy in enumerate(buys_to_create):
                 bid_order_id = self.c_buy_with_specific_market(
                     self._market_info,
                     buy.size,
@@ -1328,20 +1389,21 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                 )
                 orders_created = True
                 if idx < number_of_pairs:
-                    order = next((o for o in self.active_orders if o.client_order_id == bid_order_id))
+                    order = next((o for o in self.active_orders if o.client_order_id == bid_order_id), None)
                     if order:
                         self._hanging_orders_tracker.add_current_pairs_of_proposal_orders_executed_by_strategy(
                             CreatedPairOfOrders(order, None))
-        if len(proposal.sells) > 0:
+                            
+        if len(sells_to_create) > 0:
             if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
                 price_quote_str = [f"{sell.size.normalize()} {self.base_asset}, "
                                    f"{sell.price.normalize()} {self.quote_asset}"
-                                   for sell in proposal.sells]
+                                   for sell in sells_to_create]
                 self.logger().info(
-                    f"({self.trading_pair}) Creating {len(proposal.sells)} ask "
+                    f"({self.trading_pair}) Creating {len(sells_to_create)} ask "
                     f"orders at (Size, Price): {price_quote_str}"
                 )
-            for idx, sell in enumerate(proposal.sells):
+            for idx, sell in enumerate(sells_to_create):
                 ask_order_id = self.c_sell_with_specific_market(
                     self._market_info,
                     sell.size,
@@ -1351,9 +1413,10 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                 )
                 orders_created = True
                 if idx < number_of_pairs:
-                    order = next((o for o in self.active_orders if o.client_order_id == ask_order_id))
+                    order = next((o for o in self.active_orders if o.client_order_id == ask_order_id), None)
                     if order:
                         self._hanging_orders_tracker.current_created_pairs_of_orders[idx].sell_order = order
+                        
         if orders_created:
             self.set_timers()
 
