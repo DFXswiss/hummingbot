@@ -59,6 +59,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                     order_refresh_time: float = 30.0,
                     max_order_age: float = 1800.0,
                     order_refresh_tolerance_pct: Decimal = s_decimal_neg_one,
+                    min_order_refresh_tolerance_orders: int = 5,
                     filled_order_delay: float = 60.0,
                     inventory_skew_enabled: bool = False,
                     inventory_target_base_pct: Decimal = s_decimal_zero,
@@ -110,6 +111,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         self._order_refresh_time = order_refresh_time
         self._max_order_age = max_order_age
         self._order_refresh_tolerance_pct = order_refresh_tolerance_pct
+        self._min_order_refresh_tolerance_orders = min_order_refresh_tolerance_orders
         self._filled_order_delay = filled_order_delay
         self._inventory_skew_enabled = inventory_skew_enabled
         self._inventory_target_base_pct = inventory_target_base_pct
@@ -190,6 +192,14 @@ cdef class PureMarketMakingStrategy(StrategyBase):
     @order_refresh_tolerance_pct.setter
     def order_refresh_tolerance_pct(self, value: Decimal):
         self._order_refresh_tolerance_pct = value
+
+    @property
+    def min_order_refresh_tolerance_orders(self) -> int:
+        return self._min_order_refresh_tolerance_orders
+
+    @min_order_refresh_tolerance_orders.setter
+    def min_order_refresh_tolerance_orders(self, value: int):
+        self._min_order_refresh_tolerance_orders = value
 
     @property
     def order_amount(self) -> Decimal:
@@ -1216,7 +1226,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             list orders_to_cancel = []
             list critical_orders_buy = []  # Orders we must keep until replacements are ready
             list critical_orders_sell = []
-            int min_orders_to_keep = 5  # Always keep at least 5 orders per side
+            int min_orders_to_keep = self._min_order_refresh_tolerance_orders  # Configurable minimum orders per side
             object price_diff
             object current_price = self.get_price()
             

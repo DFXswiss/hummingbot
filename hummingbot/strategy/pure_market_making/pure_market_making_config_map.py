@@ -175,6 +175,13 @@ pure_market_making_config_map = {
                   type_str="decimal",
                   default=Decimal("0"),
                   validator=lambda v: validate_decimal(v, -10, 10, inclusive=True)),
+    "min_order_refresh_tolerance_orders":
+        ConfigVar(key="min_order_refresh_tolerance_orders",
+                  prompt="Enter the minimum number of orders to keep per side when refreshing "
+                         "(Enter 5 for 5 orders per side) >>> ",
+                  type_str="int",
+                  default=5,
+                  validator=lambda v: validate_decimal(v, 1, 100, inclusive=True)),
     "order_amount":
         ConfigVar(key="order_amount",
                   prompt=order_amount_prompt,

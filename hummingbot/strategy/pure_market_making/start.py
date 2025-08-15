@@ -52,6 +52,7 @@ def start(self):
         price_source_custom_api = c_map.get("price_source_custom_api").value
         custom_api_update_interval = c_map.get("custom_api_update_interval").value
         order_refresh_tolerance_pct = c_map.get("order_refresh_tolerance_pct").value / Decimal('100')
+        min_order_refresh_tolerance_orders = c_map.get("min_order_refresh_tolerance_orders").value
         order_override = c_map.get("order_override").value
         split_order_levels_enabled = c_map.get("split_order_levels_enabled").value
         moving_price_band = MovingPriceBand(
@@ -133,6 +134,7 @@ def start(self):
             ping_pong_enabled=ping_pong_enabled,
             hanging_orders_cancel_pct=hanging_orders_cancel_pct,
             order_refresh_tolerance_pct=order_refresh_tolerance_pct,
+            min_order_refresh_tolerance_orders=min_order_refresh_tolerance_orders,
             minimum_spread=minimum_spread,
             hb_app_notification=True,
             order_override={} if order_override is None else order_override,
