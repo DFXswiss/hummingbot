@@ -3,7 +3,7 @@
 ########################################################
 
 template_version: 24
-strategy: pure_market_making
+strategy: pure_market_making_volume_support
 
 # Exchange and token parameters.
 exchange: xt

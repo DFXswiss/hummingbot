@@ -1,0 +1,79 @@
+########################################################
+###   Pure Market Making with Volume Support config  ###
+########################################################
+
+template_version: 1
+strategy: pure_market_making_volume_support
+
+# Exchange and token parameters.
+exchange:
+
+# Token trading pair for the exchange
+market:
+
+# Spread configuration
+bid_spread:
+ask_spread:
+
+# Order configuration
+order_amount:
+order_levels: 1
+order_level_spread: 1
+order_level_amount: 0
+
+# Timing configuration
+order_refresh_time: 30.0
+max_order_age: 1800.0
+order_refresh_tolerance_pct: 0
+filled_order_delay: 60
+
+# Inventory skew configuration
+inventory_skew_enabled: false
+inventory_target_base_pct: 50
+inventory_range_multiplier: 1.0
+
+# Price bands
+price_ceiling: -1
+price_floor: -1
+moving_price_band_enabled: false
+price_ceiling_pct: 1
+price_floor_pct: -1
+price_band_refresh_time: 86400
+
+# Advanced features
+ping_pong_enabled: false
+hanging_orders_enabled: false
+hanging_orders_cancel_pct: 10
+order_optimization_enabled: false
+ask_order_optimization_depth: 0
+bid_order_optimization_depth: 0
+add_transaction_costs: false
+
+# Price source configuration
+price_source: current_market
+price_type: mid_price
+price_source_exchange:
+price_source_market:
+price_source_custom_api:
+custom_api_update_interval: 5.0
+take_if_crossed: false
+
+# Order override configuration
+order_override:
+split_order_levels_enabled: false
+bid_order_level_spreads:
+ask_order_level_spreads:
+bid_order_level_amounts:
+ask_order_level_amounts:
+
+# Minimum spread
+minimum_spread: -100
+
+# Cancel order wait time
+should_wait_order_cancel_confirmation: true
+
+# Volume injection parameters for guaranteed transaction frequency
+volume_injection_enabled: true
+min_transaction_interval: 60.0
+volume_injection_amount_pct: 15.0
+volume_injection_spread_pct: 20.0
