@@ -1410,7 +1410,6 @@ cdef class PureMarketMakingStrategy(StrategyBase):
     cdef bint c_to_create_orders(self, object proposal):
         non_hanging_orders_non_cancelled = [o for o in self.active_non_hanging_orders if not
                                             self._hanging_orders_tracker.is_potential_hanging_order(o)]
-        # Changed: Create orders if we have fewer orders than expected, not just when all are gone
         active_buys = [o for o in non_hanging_orders_non_cancelled if o.is_buy]
         active_sells = [o for o in non_hanging_orders_non_cancelled if not o.is_buy]
         
