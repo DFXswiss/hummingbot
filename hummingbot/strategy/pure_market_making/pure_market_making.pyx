@@ -1223,11 +1223,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
         cdef:
             list active_orders = self.active_non_hanging_orders
-            list orders_to_cancel = []
-            list critical_orders_buy = []  # Orders we must keep until replacements are ready
-            list critical_orders_sell = []
-            int min_orders_to_keep = self._min_order_refresh_tolerance_orders  # Configurable minimum orders per side
-            object price_diff
+            int min_orders_to_keep = self._min_order_refresh_tolerance_orders
             object current_price = self.get_price()
             
         if len(active_orders) == 0:
@@ -1284,7 +1280,9 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                     if current_price and current_price > 0:
                         orders.sort(key=lambda x: abs(x.price - current_price))
                     else:
-                        orders.sort(key=lambda x: x.price, reverse=orders[0].is_buy)
+                        # For buys: keep highest prices, for sells: keep lowest prices
+                        is_buy = orders[0].is_buy if orders else True
+                        orders.sort(key=lambda x: x.price, reverse=is_buy)
                     orders_to_cancel.extend(orders[min_orders_to_keep:])
             
             if orders_to_cancel:
