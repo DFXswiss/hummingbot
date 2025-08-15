@@ -1205,8 +1205,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
     cdef c_cancel_active_orders(self, object proposal):
         """
-        Cancels active non hanging orders, checks if the order prices are within tolerance threshold
-        Improved version: Only cancels individual orders that are outside tolerance, not all orders
+        Smart order cancellation that ensures order book is never empty.
+        Only cancels orders that need updating, while maintaining minimum liquidity.
         """
         if self._cancel_timestamp > self._current_timestamp:
             return
@@ -1214,9 +1214,11 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         cdef:
             list active_orders = self.active_non_hanging_orders
             list orders_to_cancel = []
-            object expected_price
+            list critical_orders_buy = []  # Orders we must keep until replacements are ready
+            list critical_orders_sell = []
+            int min_orders_to_keep = 5  # Always keep at least 5 orders per side
             object price_diff
-            int i
+            object current_price = self.get_price()
             
         if len(active_orders) == 0:
             return
@@ -1230,9 +1232,17 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             proposal_buys = sorted(proposal.buys, key=lambda x: x.price, reverse=True)
             proposal_sells = sorted(proposal.sells, key=lambda x: x.price)
             
+            # Identify critical orders (closest to mid price) that we want to keep if possible
+            if len(active_buys) > 0:
+                critical_orders_buy = active_buys[:min(min_orders_to_keep, len(active_buys))]
+            if len(active_sells) > 0:
+                critical_orders_sell = active_sells[:min(min_orders_to_keep, len(active_sells))]
+            
             # For buy orders - check each active order against proposal
             for order in active_buys:
                 should_cancel = False
+                is_critical = order in critical_orders_buy
+                
                 # Find the closest proposal price
                 min_diff = Decimal("999999")
                 closest_proposal = None
@@ -1243,12 +1253,14 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                         min_diff = diff
                         closest_proposal = proposal_buy
                 
-                if closest_proposal:
-                    # Check if this order is within tolerance of any expected price
+                if closest_proposal and closest_proposal.price > 0:
+                    # Use stricter tolerance for critical orders (3x normal tolerance)
+                    tolerance_to_use = self._order_refresh_tolerance_pct * 3 if is_critical else self._order_refresh_tolerance_pct
                     price_diff = min_diff / closest_proposal.price
-                    if price_diff > self._order_refresh_tolerance_pct:
+                    if price_diff > tolerance_to_use:
                         should_cancel = True
-                else:
+                elif not is_critical:
+                    # Non-critical order with no matching proposal
                     should_cancel = True
                     
                 if should_cancel:
@@ -1257,6 +1269,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             # For sell orders - check each active order against proposal
             for order in active_sells:
                 should_cancel = False
+                is_critical = order in critical_orders_sell
+                
                 # Find the closest proposal price
                 min_diff = Decimal("999999")
                 closest_proposal = None
@@ -1267,35 +1281,80 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                         min_diff = diff
                         closest_proposal = proposal_sell
                 
-                if closest_proposal:
-                    # Check if this order is within tolerance of any expected price
+                if closest_proposal and closest_proposal.price > 0:
+                    # Use stricter tolerance for critical orders (3x normal tolerance)
+                    tolerance_to_use = self._order_refresh_tolerance_pct * 3 if is_critical else self._order_refresh_tolerance_pct
                     price_diff = min_diff / closest_proposal.price
-                    if price_diff > self._order_refresh_tolerance_pct:
+                    if price_diff > tolerance_to_use:
                         should_cancel = True
-                else:
+                elif not is_critical:
+                    # Non-critical order with no matching proposal
                     should_cancel = True
                     
                 if should_cancel:
                     orders_to_cancel.append(order)
             
-            # Only cancel orders that are outside tolerance
-            # Missing orders will be created by c_execute_orders_proposal later
+            # Ensure we never cancel all orders - always keep minimum on each side
+            if len(orders_to_cancel) > 0:
+                # Calculate how many we can safely cancel
+                remaining_buys = len([o for o in active_buys if o not in orders_to_cancel])
+                remaining_sells = len([o for o in active_sells if o not in orders_to_cancel])
+                
+                # Sort orders to cancel by distance from mid price (cancel furthest first)
+                if current_price and current_price > 0:
+                    orders_to_cancel.sort(key=lambda x: abs(x.price - current_price), reverse=True)
+                
+                # Only cancel orders if we'll still have minimum coverage
+                safe_to_cancel = []
+                for order in orders_to_cancel:
+                    if order.is_buy:
+                        if remaining_buys > min_orders_to_keep:
+                            safe_to_cancel.append(order)
+                            remaining_buys -= 1
+                    else:
+                        if remaining_sells > min_orders_to_keep:
+                            safe_to_cancel.append(order)
+                            remaining_sells -= 1
+                
+                if len(safe_to_cancel) > 0:
+                    if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
+                        self.logger().info(
+                            f"Safely cancelling {len(safe_to_cancel)} of {len(active_orders)} orders "
+                            f"(keeping minimum {min_orders_to_keep} per side, "
+                            f"tolerance: {self._order_refresh_tolerance_pct:.2%})"
+                        )
+                    self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
+                    for order in safe_to_cancel:
+                        if not self._hanging_orders_tracker.is_potential_hanging_order(order):
+                            self.c_cancel_order(self._market_info, order.client_order_id)
+        else:
+            # When tolerance checking is disabled, still maintain minimum orders
+            active_buys = [o for o in active_orders if o.is_buy]
+            active_sells = [o for o in active_orders if not o.is_buy]
+            
+            # Never cancel all orders - use staggered cancellation
+            orders_to_cancel = []
+            
+            # Keep minimum orders on each side (closest to mid price)
+            if current_price and current_price > 0:
+                active_buys.sort(key=lambda x: abs(x.price - current_price))
+                active_sells.sort(key=lambda x: abs(x.price - current_price))
+            
+            # Only cancel orders beyond the minimum threshold
+            if len(active_buys) > min_orders_to_keep:
+                orders_to_cancel.extend(active_buys[min_orders_to_keep:])
+            if len(active_sells) > min_orders_to_keep:
+                orders_to_cancel.extend(active_sells[min_orders_to_keep:])
+            
             if len(orders_to_cancel) > 0:
                 if self._logging_options & self.OPTION_LOG_ADJUST_ORDER:
                     self.logger().info(
-                        f"Cancelling {len(orders_to_cancel)} of {len(active_orders)} orders "
-                        f"that are outside {self._order_refresh_tolerance_pct:.2%} tolerance"
+                        f"Cancelling {len(orders_to_cancel)} orders while keeping minimum {min_orders_to_keep} per side"
                     )
                 self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
                 for order in orders_to_cancel:
                     if not self._hanging_orders_tracker.is_potential_hanging_order(order):
                         self.c_cancel_order(self._market_info, order.client_order_id)
-        else:
-            # Original behavior when tolerance checking is disabled
-            self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-            for order in self.active_non_hanging_orders:
-                if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                    self.c_cancel_order(self._market_info, order.client_order_id)
 
     # Cancel Non-Hanging, Active Orders if Spreads are below minimum_spread
     cdef c_cancel_orders_below_min_spread(self):
