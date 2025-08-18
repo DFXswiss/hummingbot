@@ -24,6 +24,7 @@ from hummingbot.data_feed.candles_feed.mexc_perpetual_candles.mexc_perpetual_can
 from hummingbot.data_feed.candles_feed.mexc_spot_candles.mexc_spot_candles import MexcSpotCandles
 from hummingbot.data_feed.candles_feed.okx_perpetual_candles.okx_perpetual_candles import OKXPerpetualCandles
 from hummingbot.data_feed.candles_feed.okx_spot_candles.okx_spot_candles import OKXSpotCandles
+from hummingbot.data_feed.candles_feed.xt_spot_candles.xt_spot_candles import XtSpotCandles
 
 
 class UnsupportedConnectorException(Exception):
@@ -60,6 +61,7 @@ class CandlesFactory:
         "hyperliquid_perpetual": HyperliquidPerpetualCandles,
         "dexalot": DexalotSpotCandles,
         "bitmart_perpetual": BitmartPerpetualCandles,
+        "xt": XtSpotCandles,
     }
 
     @classmethod

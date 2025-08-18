@@ -60,7 +60,7 @@ class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
         return data["result"]
 
-    async def _send_periodic_ping(self, ws: WSAssistant, interval: float = 15.0):
+    async def _send_periodic_ping(self, ws: WSAssistant, interval: float = CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL):
         """
         Periodically sends a raw string 'ping' message through the websocket connection using the low-level method.
         """

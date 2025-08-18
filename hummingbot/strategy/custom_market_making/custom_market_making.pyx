@@ -1203,8 +1203,7 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
 
     cdef c_process_orders_sequentially(self, object proposal):
         """
-        Processes orders sequentially: for each existing order, cancel it and immediately create its replacement
-        Orders are matched by level (index) to maintain proper pairing
+        Processes orders sequentially: cancel one order then create one, ordered by price (lower first)
         """
         if self._cancel_timestamp > self._current_timestamp:
             return
@@ -1217,7 +1216,6 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
             double expiration_seconds = NaN
             str bid_order_id, ask_order_id
             bint orders_created = False
-            int number_of_pairs = min((len(proposal.buys), len(proposal.sells))) if self._hanging_orders_enabled else 0
 
         if len(active_orders) == 0:
             # No active orders, just create new ones
@@ -1238,66 +1236,29 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         if not to_defer_canceling:
             self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
 
-            # Sort active orders by price to match with proposal levels
-            active_buys = sorted([o for o in active_orders if o.is_buy], key=lambda x: x.price, reverse=True)
+            # Sort active orders by price (lower price first)
+            active_buys = sorted([o for o in active_orders if o.is_buy], key=lambda x: x.price)
             active_sells = sorted([o for o in active_orders if not o.is_buy], key=lambda x: x.price)
 
-            # Process buy orders by level
-            for idx, order in enumerate(active_buys):
-                if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                    # Cancel the existing order
-                    self.c_cancel_order(self._market_info, order.client_order_id)
+            # Sort proposal orders by price (lower price first)
+            proposal_buys = sorted(proposal.buys, key=lambda x: x.price) if proposal.buys else []
+            proposal_sells = sorted(proposal.sells, key=lambda x: x.price) if proposal.sells else []
 
-                    # Create replacement at the same level
-                    if idx < len(proposal.buys):
-                        buy = proposal.buys[idx]
-                        if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
-                            self.logger().info(
-                                f"({self.trading_pair}) Creating replacement bid order (level {idx}) "
-                                f"at (Size, Price): {buy.size.normalize()} {self.base_asset}, "
-                                f"{buy.price.normalize()} {self.quote_asset}"
-                            )
-                        bid_order_id = self.c_buy_with_specific_market(
-                            self._market_info,
-                            buy.size,
-                            order_type=self._limit_order_type,
-                            price=buy.price,
-                            expiration_seconds=expiration_seconds
-                        )
-                        orders_created = True
+            # Process buy orders: cancel then create
+            max_buys = max(len(active_buys), len(proposal_buys))
+            for idx in range(max_buys):
+                # Cancel existing buy order if it exists and is not hanging
+                if idx < len(active_buys):
+                    order = active_buys[idx]
+                    if not self._hanging_orders_tracker.is_potential_hanging_order(order):
+                        self.c_cancel_order(self._market_info, order.client_order_id)
 
-            # Process sell orders by level
-            for idx, order in enumerate(active_sells):
-                if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                    # Cancel the existing order
-                    self.c_cancel_order(self._market_info, order.client_order_id)
-
-                    # Create replacement at the same level
-                    if idx < len(proposal.sells):
-                        sell = proposal.sells[idx]
-                        if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
-                            self.logger().info(
-                                f"({self.trading_pair}) Creating replacement ask order (level {idx}) "
-                                f"at (Size, Price): {sell.size.normalize()} {self.base_asset}, "
-                                f"{sell.price.normalize()} {self.quote_asset}"
-                            )
-                        ask_order_id = self.c_sell_with_specific_market(
-                            self._market_info,
-                            sell.size,
-                            order_type=self._limit_order_type,
-                            price=sell.price,
-                            expiration_seconds=expiration_seconds
-                        )
-                        orders_created = True
-
-            # Create any remaining orders that don't have existing orders to replace
-            remaining_buys = len(proposal.buys) - len(active_buys)
-            if remaining_buys > 0:
-                for idx in range(len(active_buys), len(proposal.buys)):
-                    buy = proposal.buys[idx]
+                # Create new buy order if it exists in proposal
+                if idx < len(proposal_buys):
+                    buy = proposal_buys[idx]
                     if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
                         self.logger().info(
-                            f"({self.trading_pair}) Creating additional bid order (level {idx}) "
+                            f"({self.trading_pair}) Creating bid order (level {idx}) "
                             f"at (Size, Price): {buy.size.normalize()} {self.base_asset}, "
                             f"{buy.price.normalize()} {self.quote_asset}"
                         )
@@ -1310,13 +1271,21 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                     )
                     orders_created = True
 
-            remaining_sells = len(proposal.sells) - len(active_sells)
-            if remaining_sells > 0:
-                for idx in range(len(active_sells), len(proposal.sells)):
-                    sell = proposal.sells[idx]
+            # Process sell orders: cancel then create
+            max_sells = max(len(active_sells), len(proposal_sells))
+            for idx in range(max_sells):
+                # Cancel existing sell order if it exists and is not hanging
+                if idx < len(active_sells):
+                    order = active_sells[idx]
+                    if not self._hanging_orders_tracker.is_potential_hanging_order(order):
+                        self.c_cancel_order(self._market_info, order.client_order_id)
+
+                # Create new sell order if it exists in proposal
+                if idx < len(proposal_sells):
+                    sell = proposal_sells[idx]
                     if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
                         self.logger().info(
-                            f"({self.trading_pair}) Creating additional ask order (level {idx}) "
+                            f"({self.trading_pair}) Creating ask order (level {idx}) "
                             f"at (Size, Price): {sell.size.normalize()} {self.base_asset}, "
                             f"{sell.price.normalize()} {self.quote_asset}"
                         )

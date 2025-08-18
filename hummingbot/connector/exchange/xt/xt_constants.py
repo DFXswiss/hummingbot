@@ -27,7 +27,7 @@ ORDER_PATH_URL = "/order"
 OPEN_ORDER_PATH_URL = "open-order"
 GET_ACCOUNT_LISTENKEY = "/ws-token"
 
-WS_HEARTBEAT_TIME_INTERVAL = 25
+WS_HEARTBEAT_TIME_INTERVAL = 10
 
 # Websocket event types
 DIFF_EVENT_TYPE = "depth_update"
