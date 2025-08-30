@@ -191,13 +191,17 @@ class XtExchange(ExchangePyBase):
         order_result = await self._api_post(
             path_url=CONSTANTS.ORDER_PATH_URL,
             data=api_params,
-            is_auth_required=True)
+            is_auth_required=True,
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
 
         if "result" not in order_result or order_result["result"] is None:
-            raise
+            raise IOError(f"Error submitting order to XT. API response: {order_result}")
 
         o_id = str(order_result["result"]["orderId"])
         transact_time = self.current_timestamp
+
+        await asyncio.sleep(0.2)
+
         return (o_id, transact_time)
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
@@ -209,7 +213,9 @@ class XtExchange(ExchangePyBase):
             path_url=CONSTANTS.ORDER_PATH_URL,
             params=api_params,
             is_auth_required=True,
-            limit_id=CONSTANTS.MANAGE_ORDER)
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
+
+        await asyncio.sleep(0.2)
 
     async def _execute_order_cancel(self, order: InFlightOrder) -> str:
         try:
@@ -287,7 +293,7 @@ class XtExchange(ExchangePyBase):
         trading_pair_rules = exchange_info_dict["result"].get("symbols", [])
         retval = []
         for rule in filter(xt_utils.is_exchange_information_valid, trading_pair_rules):
-            
+
             try:
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=rule.get("symbol"))
                 filters = rule.get("filters")
@@ -366,7 +372,7 @@ class XtExchange(ExchangePyBase):
 
                         order_update = OrderUpdate(
                             trading_pair=tracked_order.trading_pair,
-                            update_timestamp=order_update["t"] * 1e-3,
+                            update_timestamp=(order_update["t"] * 1e-3) if "t" in order_update and order_update["t"] is not None else None,
                             new_state=CONSTANTS.ORDER_STATE[order_update["st"]],
                             client_order_id=tracked_order.client_order_id,
                             exchange_order_id=str(order_update["i"]),
@@ -425,7 +431,7 @@ class XtExchange(ExchangePyBase):
                     "orderId": int(exchange_order_id)
                 },
                 is_auth_required=True,
-                limit_id=CONSTANTS.MANAGE_ORDER)
+                limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
 
             # order update might've already come through user stream listner
             # and order might no longer be available on the exchange.
@@ -465,7 +471,7 @@ class XtExchange(ExchangePyBase):
                 "orderId": int(exchange_order_id),
                 "clientOrderId": client_order_id},
             is_auth_required=True,
-            limit_id=CONSTANTS.MANAGE_ORDER)
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
 
         # order update might've already come through user stream listner
         # and order might no longer be available on the exchange.
@@ -482,7 +488,7 @@ class XtExchange(ExchangePyBase):
             client_order_id=tracked_order.client_order_id,
             exchange_order_id=str(updated_order_data["orderId"]),
             trading_pair=tracked_order.trading_pair,
-            update_timestamp=updated_order_data["updatedTime"] * 1e-3,
+            update_timestamp=(updated_order_data["updatedTime"] * 1e-3) if "updatedTime" in updated_order_data and updated_order_data["updatedTime"] is not None else None,
             new_state=new_state,
         )
 
@@ -494,7 +500,10 @@ class XtExchange(ExchangePyBase):
 
         account_info = await self._api_get(
             path_url=CONSTANTS.ACCOUNTS_PATH_URL,
-            is_auth_required=True)
+            is_auth_required=True,
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
+
+        await asyncio.sleep(0.2)
 
         if "result" not in account_info or account_info["result"] is None:
             raise IOError(f"Error fetching account updates. API response: {account_info}")
@@ -528,7 +537,8 @@ class XtExchange(ExchangePyBase):
         resp_json = await self._api_request(
             method=RESTMethod.GET,
             path_url=CONSTANTS.TICKER_PRICE_CHANGE_PATH_URL,
-            params=params
+            params=params,
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
         )
 
         return float(resp_json["result"]["p"])
@@ -549,7 +559,7 @@ class XtExchange(ExchangePyBase):
                 path_url=CONSTANTS.OPEN_ORDER_PATH_URL,
                 params=params,
                 is_auth_required=True,
-                limit_id=CONSTANTS.MANAGE_ORDER
+                limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
             )
 
             tasks.append(task)
@@ -562,3 +572,26 @@ class XtExchange(ExchangePyBase):
                     open_orders.append(order["clientOrderId"])
 
         return open_orders
+
+    async def _make_network_check_request(self):
+        """Override to use global rate limit for network check requests."""
+        await self._api_get(
+            path_url=self.check_network_request_path,
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
+        )
+
+    async def _make_trading_rules_request(self) -> Any:
+        """Override to use global rate limit for trading rules requests."""
+        exchange_info = await self._api_get(
+            path_url=self.trading_rules_request_path,
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
+        )
+        return exchange_info
+
+    async def _make_trading_pairs_request(self) -> Any:
+        """Override to use global rate limit for trading pairs requests."""
+        exchange_info = await self._api_get(
+            path_url=self.trading_pairs_request_path,
+            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
+        )
+        return exchange_info
