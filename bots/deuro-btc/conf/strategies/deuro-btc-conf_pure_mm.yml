@@ -3,7 +3,7 @@
 ########################################################
 
 template_version: 24
-strategy: custom_pure_market_making
+strategy: custom_market_making
 
 # Exchange and token parameters.
 exchange: xt
@@ -89,7 +89,7 @@ filled_order_delay: 10
 
 # Whether to stop cancellations of orders on the other side (of the order book),
 # when one side is filled (hanging orders feature) (true/false).
-hanging_orders_enabled: true
+hanging_orders_enabled: false
 
 # Spread (from mid price, in percentage) hanging orders will be canceled (Enter 1 to indicate 1%)
 hanging_orders_cancel_pct: 2.0
@@ -148,7 +148,7 @@ bid_order_level_amounts:
 ask_order_level_amounts:
 
 # If the strategy should wait to receive cancellations confirmation before creating new orders during refresh time
-should_wait_order_cancel_confirmation: false
+should_wait_order_cancel_confirmation: true
 
 # Use CoinGecko as rate oracle source
 rate_oracle_source: coin_gecko
