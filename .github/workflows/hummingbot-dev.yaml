@@ -63,6 +63,8 @@ jobs:
         env:
           DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
           STORAGE_KEY: ${{ env.STORAGE_KEY }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Deploy container instance
         run: |
