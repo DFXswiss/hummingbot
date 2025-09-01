@@ -50,10 +50,10 @@ jobs:
         uses: azure/CLI@v2
         with:
           inlineScript: |
-            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_04 }} --image ${{ env.DOCKER_TAGS }} --set-env-vars DEPLOY_INFO=${{ env.DEPLOY_INFO }}
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_01 }} --image ${{ env.DOCKER_TAGS }} --set-env-vars DEPLOY_INFO=${{ env.DEPLOY_INFO }}
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_02 }} --image ${{ env.DOCKER_TAGS }} --set-env-vars DEPLOY_INFO=${{ env.DEPLOY_INFO }}
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_03 }} --image ${{ env.DOCKER_TAGS }} --set-env-vars DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_04 }} --image ${{ env.DOCKER_TAGS }} --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_01 }} --image ${{ env.DOCKER_TAGS }} --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_02 }} --image ${{ env.DOCKER_TAGS }} --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_03 }} --image ${{ env.DOCKER_TAGS }} --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
       - name: Logout from Azure
         run: |
           az logout
