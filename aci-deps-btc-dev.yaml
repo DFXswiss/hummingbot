@@ -27,3 +27,7 @@ properties:
         storageAccountName: stdfxapidev
         storageAccountKey: "${STORAGE_KEY}"
   restartPolicy: Always
+  imageRegistryCredentials:
+    - server: index.docker.io
+      username: "${DOCKER_USERNAME}"
+      password: "${DOCKER_PASSWORD}"
