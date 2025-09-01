@@ -13,7 +13,7 @@ env:
 #  AZURE_CONTAINER_INSTANCE_02: ci-dfx-hb-deuro-btc-dev
 #  AZURE_CONTAINER_INSTANCE_03: ci-dfx-hb-deps-usdt-dev
 #  AZURE_CONTAINER_INSTANCE_04: ci-dfx-hb-deps-btc-dev
-#  DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
+  DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
 
 jobs:
   build-and-deploy:
@@ -49,19 +49,20 @@ jobs:
 
       - name: Get storage key
         run: |
-          export STORAGE_KEY=$(az storage account keys list \
+          STORAGE_KEY=$(az storage account keys list \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --account-name $AZURE_STORAGE_ACCOUNT_NAME \
+            --account-name ${{ env.AZURE_STORAGE_ACCOUNT_NAME }} \
             --query '[0].value' -o tsv)
+          echo "STORAGE_KEY=$STORAGE_KEY" >> $GITHUB_ENV
 
       - name: Render deployment YAML
         uses: nowactions/envsubst@v1
         with:
           input: ./aci-deps-btc-dev.yaml
           output: ./rendered-aci-deps-btc-dev.yaml
-          env:
-            COMMIT_ID: ${{ github.ref_name }}-${{ github.sha }}
-            STORAGE_KEY: ${{ STORAGE_KEY }}
+        env:
+          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
+          STORAGE_KEY: ${{ env.STORAGE_KEY }}
 
       - name: Deploy container instance
         run: |

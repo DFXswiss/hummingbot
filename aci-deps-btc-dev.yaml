@@ -16,7 +16,7 @@ properties:
           - name: BOT_DIR
             value: "deps-btc-dev"
           - name: DEPLOY_INFO
-            value: "${COMMIT_ID}"
+            value: "${DEPLOY_INFO}"
         volumeMounts:
           - name: volume
             mountPath: /mnt/hummingbot
