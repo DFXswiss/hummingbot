@@ -26,9 +26,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set COMMIT_ID
-        run: echo "COMMIT_ID=${GITHUB_SHA::7}" >> $GITHUB_ENV
-
 #      - name: Log in to Docker Hub
 #        uses: docker/login-action@v3
 #        with:
@@ -53,20 +50,24 @@ jobs:
       - name: Get storage key
         run: |
           export STORAGE_KEY=$(az storage account keys list \
-            --resource-group $AZURE_RESOURCE_GROUP \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --account-name $AZURE_STORAGE_ACCOUNT_NAME \
             --query '[0].value' -o tsv)
-          echo "STORAGE_KEY=$STORAGE_KEY" >> $GITHUB_ENV
 
-      - name: Render YAML with Commit ID and Storage Key
-        run: |
-          envsubst < aci-deps-btc-dev.yaml > rendered-aci-deps-btc-dev.yaml
+      - name: Render deployment YAML
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./aci-deps-btc-dev.yaml
+          output: ./rendered-aci-deps-btc-dev.yaml
+          env:
+            COMMIT_ID: ${{ github.ref_name }}-${{ github.sha }}
+            STORAGE_KEY: ${{ STORAGE_KEY }}
 
       - name: Deploy container instance
         run: |
           az deployment group create \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --template-file rendered-aci-deps-btc-dev.yaml
+            --template-file ./rendered-aci-deps-btc-dev.yaml
 
 #      - name: Update Azure Container Group
 #        uses: azure/CLI@v2
