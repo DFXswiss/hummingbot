@@ -1,0 +1,29 @@
+apiVersion: 2023-05-01
+location: westeurope
+name: ci-dfx-hb-deps-btc-dev
+type: Microsoft.ContainerInstance/containerGroups
+properties:
+  osType: Linux
+  containers:
+    - name: hb-deps-btc
+      properties:
+        image: dfxswiss/hummingbot:beta
+        resources:
+          requests:
+            cpu: 2.0
+            memoryInGb: 4.0
+        environmentVariables:
+          - name: BOT_DIR
+            value: "deps-btc-dev"
+          - name: DEPLOY_INFO
+            value: "${COMMIT_ID}"
+        volumeMounts:
+          - name: volume
+            mountPath: /mnt/hummingbot
+  volumes:
+    - name: volume
+      azureFile:
+        shareName: ci-hb-deps-btc
+        storageAccountName: stdfxapidev
+        storageAccountKey: "${STORAGE_KEY}"
+  restartPolicy: Always

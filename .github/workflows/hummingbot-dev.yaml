@@ -8,11 +8,12 @@ on:
 env:
   DOCKER_TAGS: dfxswiss/hummingbot:beta
   AZURE_RESOURCE_GROUP: rg-dfx-api-dev
+  AZURE_STORAGE_ACCOUNT_NAME: stdfxapidev
 #  AZURE_CONTAINER_INSTANCE_01: ci-dfx-hb-deuro-usdt-dev
 #  AZURE_CONTAINER_INSTANCE_02: ci-dfx-hb-deuro-btc-dev
 #  AZURE_CONTAINER_INSTANCE_03: ci-dfx-hb-deps-usdt-dev
-  AZURE_CONTAINER_INSTANCE_04: ci-dfx-hb-deps-btc-dev
-  DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
+#  AZURE_CONTAINER_INSTANCE_04: ci-dfx-hb-deps-btc-dev
+#  DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
 
 jobs:
   build-and-deploy:
@@ -25,35 +26,57 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Set COMMIT_ID
+        run: echo "COMMIT_ID=${github.ref_name}-${github.sha}" >> $GITHUB_ENV
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+#      - name: Log in to Docker Hub
+#        uses: docker/login-action@v3
+#        with:
+#          username: ${{ secrets.DOCKER_USERNAME }}
+#          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ env.DOCKER_TAGS }}
+#      - name: Set up Docker Buildx
+#        uses: docker/setup-buildx-action@v3
+
+#      - name: Build and push Docker image
+#        uses: docker/build-push-action@v6
+#        with:
+#          context: .
+#          push: true
+#          tags: ${{ env.DOCKER_TAGS }}
 
       - name: Log in to Azure
         uses: azure/login@v2
         with:
           creds: ${{ secrets.DFX_DEV_CREDENTIALS }}
 
-      - name: Update Azure Container Group
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_04 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+      - name: Get storage key
+        run: |
+          export STORAGE_KEY=$(az storage account keys list \
+            --resource-group $AZURE_RESOURCE_GROUP \
+            --account-name $AZURE_STORAGE_ACCOUNT_NAME \
+            --query '[0].value' -o tsv)
+          echo "STORAGE_KEY=$STORAGE_KEY" >> $GITHUB_ENV
+
+      - name: Render YAML with Commit ID and Storage Key
+        run: |
+          envsubst < aci-deps-btc-dev.yaml > rendered-aci-deps-btc-dev.yaml
+
+      - name: Deploy container instance
+        run: |
+          az deployment group create \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --template-file rendered-aci-deps-btc-dev.yaml
+
+#      - name: Update Azure Container Group
+#        uses: azure/CLI@v2
+#        with:
+#          inlineScript: |
+#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_04 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --cpu 2 --memory 4 --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
 #            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_01 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
 #            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_02 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
 #            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_03 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+
       - name: Logout from Azure
         run: |
           az logout
