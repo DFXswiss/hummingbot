@@ -105,17 +105,17 @@ jobs:
 
       - name: Stop Azure Container Instance
         run: |
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_03 }}
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_04 }}
-#          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_01 }}
-#          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_02 }}
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev
+#          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev
+#          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev
 
       - name: Delete Azure Container Instance
         run: |
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_03 }} --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_04 }} --yes
-#          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_01 }} --yes
-#          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name hb-${{ env.CRYPTO_PAIR_02 }} --yes
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev --yes
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev --yes
+#          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev --yes
+#          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev --yes
 
       - name: Deploy container instance
         run: |
