@@ -26,6 +26,7 @@ then
     if [[ -e $sourceDir ]]
     then
       mkdir -p $targetDir
+      echo "$(date): Copy ${sourceDir} to ${targetDir}" >> $myLogFile
       cp -r $sourceDir $targetDir
     fi
   done

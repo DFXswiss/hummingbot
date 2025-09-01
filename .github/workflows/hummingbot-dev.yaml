@@ -6,13 +6,13 @@ on:
   workflow_dispatch:
 
 env:
+  CRYPTO_PAIR_01: deuro-usdt
+  CRYPTO_PAIR_02: deuro-btc
+  CRYPTO_PAIR_03: deps-usdt
+  CRYPTO_PAIR_04: deps-btc
   DOCKER_TAGS: dfxswiss/hummingbot:beta
   AZURE_RESOURCE_GROUP: rg-dfx-api-dev
   AZURE_STORAGE_ACCOUNT_NAME: stdfxapidev
-#  AZURE_CONTAINER_INSTANCE_01: ci-dfx-hb-deuro-usdt-dev
-#  AZURE_CONTAINER_INSTANCE_02: ci-dfx-hb-deuro-btc-dev
-#  AZURE_CONTAINER_INSTANCE_03: ci-dfx-hb-deps-usdt-dev
-#  AZURE_CONTAINER_INSTANCE_04: ci-dfx-hb-deps-btc-dev
   DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
 
 jobs:
@@ -26,21 +26,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-#      - name: Log in to Docker Hub
-#        uses: docker/login-action@v3
-#        with:
-#          username: ${{ secrets.DOCKER_USERNAME }}
-#          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-#      - name: Set up Docker Buildx
-#        uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-#      - name: Build and push Docker image
-#        uses: docker/build-push-action@v6
-#        with:
-#          context: .
-#          push: true
-#          tags: ${{ env.DOCKER_TAGS }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.DOCKER_TAGS }}
 
       - name: Log in to Azure
         uses: azure/login@v2
@@ -55,12 +55,49 @@ jobs:
             --query '[0].value' -o tsv)
           echo "STORAGE_KEY=$STORAGE_KEY" >> $GITHUB_ENV
 
-      - name: Render deployment YAML
+      - name: Render deployment YAML for CRYPTO_PAIR_01
         uses: nowactions/envsubst@v1
         with:
-          input: ./aci-deps-btc-dev.yaml
-          output: ./rendered-aci-deps-btc-dev.yaml
+          input: ./aci-dev.yaml
+          output: ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-dev.yaml
         env:
+          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_01 }}
+          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
+          STORAGE_KEY: ${{ env.STORAGE_KEY }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Render deployment YAML for CRYPTO_PAIR_02
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./aci-dev.yaml
+          output: ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-dev.yaml
+        env:
+          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_02 }}
+          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
+          STORAGE_KEY: ${{ env.STORAGE_KEY }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Render deployment YAML for CRYPTO_PAIR_03
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./aci-dev.yaml
+          output: ./rendered-aci-${{ env.CRYPTO_PAIR_03 }}-dev.yaml
+        env:
+          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_03 }}
+          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
+          STORAGE_KEY: ${{ env.STORAGE_KEY }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Render deployment YAML for CRYPTO_PAIR_04
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./aci-dev.yaml
+          output: ./rendered-aci-${{ env.CRYPTO_PAIR_04 }}-dev.yaml
+        env:
+          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_04 }}
           DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
           STORAGE_KEY: ${{ env.STORAGE_KEY }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
@@ -68,18 +105,12 @@ jobs:
 
       - name: Deploy container instance
         run: |
-          az container create \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --file ./rendered-aci-deps-btc-dev.yaml
+          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_04 }}-dev.yaml
 
-#      - name: Update Azure Container Group
-#        uses: azure/CLI@v2
-#        with:
-#          inlineScript: |
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_04 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --cpu 2 --memory 4 --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_01 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_02 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
-#            az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_CONTAINER_INSTANCE_03 }} --image ${{ env.DOCKER_TAGS }} --os-type Linux --environment-variables DEPLOY_INFO=${{ env.DEPLOY_INFO }}
+#          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-dev.yaml
+#          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-dev.yaml
+#          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_03 }}-dev.yaml
+#          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_04 }}-dev.yaml
 
       - name: Logout from Azure
         run: |

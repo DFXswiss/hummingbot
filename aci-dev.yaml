@@ -1,11 +1,11 @@
 apiVersion: 2023-05-01
 location: westeurope
-name: ci-dfx-hb-deps-btc-dev
+name: "ci-dfx-hb-${CRYPTO_PAIR}-dev"
 type: Microsoft.ContainerInstance/containerGroups
 properties:
   osType: Linux
   containers:
-    - name: hb-deps-btc
+    - name: "hb-${CRYPTO_PAIR}"
       properties:
         image: dfxswiss/hummingbot:beta
         resources:
@@ -14,7 +14,7 @@ properties:
             memoryInGb: 4.0
         environmentVariables:
           - name: BOT_DIR
-            value: "deps-btc-dev"
+            value: "${CRYPTO_PAIR}-dev"
           - name: DEPLOY_INFO
             value: "${DEPLOY_INFO}"
         volumeMounts:
@@ -23,7 +23,7 @@ properties:
   volumes:
     - name: volume
       azureFile:
-        shareName: ci-hb-deps-btc
+        shareName: "ci-hb-${CRYPTO_PAIR}"
         storageAccountName: stdfxapidev
         storageAccountKey: "${STORAGE_KEY}"
   restartPolicy: Always
