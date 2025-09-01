@@ -66,9 +66,9 @@ jobs:
 
       - name: Deploy container instance
         run: |
-          az deployment group create \
+          az container create \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --template-file ./rendered-aci-deps-btc-dev.yaml
+            --file ./rendered-aci-deps-btc-dev.yaml
 
 #      - name: Update Azure Container Group
 #        uses: azure/CLI@v2
