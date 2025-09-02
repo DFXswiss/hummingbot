@@ -33,3 +33,7 @@ properties:
     - server: index.docker.io
       username: "${DOCKER_USERNAME}"
       password: "${DOCKER_PASSWORD}"
+  diagnostics:
+    logAnalytics:
+      workspaceId: "${LOG_WORKSPACE_ID}"
+      workspaceKey: "${LOG_WORKSPACE_KEY}"
