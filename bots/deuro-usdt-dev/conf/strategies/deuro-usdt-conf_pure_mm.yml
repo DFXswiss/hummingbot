@@ -165,5 +165,5 @@ coin_id_overrides:
   DEPS: native-decentralized-euro-protocol-share
   ndeps: native-decentralized-euro-protocol-share
   NDEPS: native-decentralized-euro-protocol-share
-  BTC: btc
-  btc: btc
+  USD: usd
+  usd: usd
