@@ -13,6 +13,7 @@ env:
   DOCKER_TAGS: dfxswiss/hummingbot:beta
   AZURE_RESOURCE_GROUP: rg-dfx-api-dev
   AZURE_STORAGE_ACCOUNT_NAME: stdfxapidev
+  AZURE_WORKSPACE_NAME: log-dfx-api-dev
   DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
 
 jobs:
