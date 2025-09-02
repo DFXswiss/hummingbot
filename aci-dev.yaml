@@ -15,6 +15,8 @@ properties:
         environmentVariables:
           - name: BOT_DIR
             value: "${CRYPTO_PAIR}-dev"
+          - name: STRATEGY_FILE
+            value: "${CRYPTO_PAIR}-conf_pure_mm.yml"
           - name: DEPLOY_INFO
             value: "${DEPLOY_INFO}"
         volumeMounts:

@@ -86,4 +86,3 @@ ENTRYPOINT ["entrypoint.sh"]
 
 # Set the default command to run when starting the container
 #CMD conda activate hummingbot && ./bin/hummingbot_quickstart.py 2>> ./logs/errors.log
-CMD ["tail", "-f", "/dev/null"]

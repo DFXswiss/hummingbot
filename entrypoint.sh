@@ -12,6 +12,7 @@ ln -sf /mnt/hummingbot/conf /home/hummingbot
 ln -sf /mnt/hummingbot/data /home/hummingbot
 ln -sf /mnt/hummingbot/logs /home/hummingbot
 
+# Setup the configuration
 botDir=`printenv BOT_DIR`
 
 if [[ ! -z $botDir ]]
@@ -34,5 +35,16 @@ else
   echo "$(date): No 'BOT_DIR' environment variable set" >> $myLogFile
 fi
 
-# Execute the container's main processes
-exec "$@"
+# Start Hummingbot with the strategy
+strategyFile=`printenv STRATEGY_FILE`
+
+if [[ ! -z $strategyFile ]]
+then
+  echo "$(date): 'STRATEGY_FILE' is ${strategyFile}" >> $myLogFile
+
+  password="$(cat /home/hummingbot/conf/.password)"
+
+  bash --login -c "conda activate hummingbot && /home/hummingbot/bin/hummingbot_quickstart.py --headless -p ${password} -f ${strategyFile}"
+else
+  echo "$(date): No 'STRATEGY_FILE' environment variable set" >> $myLogFile
+fi
