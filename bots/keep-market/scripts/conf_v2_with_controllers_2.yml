@@ -1,0 +1,9 @@
+markets: {"xt": ["DEPS-USDT", "DEURO-USDT", "DEURO-BTC"]}
+candles_config: []
+controllers_config:
+- conf_keep_market_deps_usdt.yml
+#- conf_keep_market_deuro_usdt.yml
+#- conf_keep_market_deuro_btc.yml
+script_file_name: v2_with_controllers.py
+max_global_drawdown_quote: null
+max_controller_drawdown_quote: null

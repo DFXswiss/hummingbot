@@ -3,8 +3,8 @@ from hummingbot.core.data_type.in_flight_order import OrderState
 
 DEFAULT_DOMAIN = "com"
 
-HBOT_ORDER_ID_PREFIX = "xt-"
-MAX_ORDER_ID_LEN = 32
+HBOT_ORDER_ID_PREFIX = ""
+MAX_ORDER_ID_LEN = 20
 
 # Base URL
 REST_URL = "https://sapi.xt.{}/"
@@ -27,7 +27,7 @@ ORDER_PATH_URL = "/order"
 OPEN_ORDER_PATH_URL = "open-order"
 GET_ACCOUNT_LISTENKEY = "/ws-token"
 
-WS_HEARTBEAT_TIME_INTERVAL = 15
+WS_HEARTBEAT_TIME_INTERVAL = 10
 
 # Websocket event types
 DIFF_EVENT_TYPE = "depth_update"
@@ -72,13 +72,8 @@ MULTIPLE_SYMBOLS = 10
 # A single rate limit id for managing orders: GET open-orders, order/trade details, DELETE cancel order.
 MANAGE_ORDER = "ManageOrder"
 
+GLOBAL_RATE_LIMIT = "GlobalRateLimit"
+
 RATE_LIMITS = [
-    RateLimit(limit_id=TICKER_PRICE_CHANGE_PATH_URL, limit=SINGLE_SYMBOL, time_interval=ONE_SECOND),
-    RateLimit(limit_id=EXCHANGE_INFO_PATH_URL, limit=MULTIPLE_SYMBOLS, time_interval=ONE_SECOND),
-    RateLimit(limit_id=SNAPSHOT_PATH_URL, limit=2 * SINGLE_SYMBOL, time_interval=ONE_SECOND),
-    RateLimit(limit_id=SERVER_TIME_PATH_URL, limit=100, time_interval=ONE_SECOND),
-    RateLimit(limit_id=ACCOUNTS_PATH_URL, limit=10, time_interval=ONE_SECOND),
-    RateLimit(limit_id=MANAGE_ORDER, limit=500, time_interval=ONE_SECOND),
-    RateLimit(limit_id=ORDER_PATH_URL, limit=50, time_interval=ONE_SECOND),
-    RateLimit(limit_id=GET_ACCOUNT_LISTENKEY, limit=10, time_interval=ONE_SECOND)
+    RateLimit(limit_id=GLOBAL_RATE_LIMIT, limit=19, time_interval=ONE_SECOND),
 ]
