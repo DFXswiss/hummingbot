@@ -148,7 +148,7 @@ bid_order_level_amounts:
 ask_order_level_amounts:
 
 # If the strategy should wait to receive cancellations confirmation before creating new orders during refresh time
-should_wait_order_cancel_confirmation: true
+should_wait_order_cancel_confirmation: false
 
 # Use CoinGecko as rate oracle source
 rate_oracle_source: coin_gecko
