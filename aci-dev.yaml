@@ -10,8 +10,8 @@ properties:
         image: dfxswiss/hummingbot:beta
         resources:
           requests:
-            cpu: 1.0
-            memoryInGb: 2.0
+            cpu: 0.5
+            memoryInGb: 1.0
         environmentVariables:
           - name: BOT_DIR
             value: "${CRYPTO_PAIR}-dev"
