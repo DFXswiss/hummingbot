@@ -192,7 +192,7 @@ class XtExchange(ExchangePyBase):
             path_url=CONSTANTS.ORDER_PATH_URL,
             data=api_params,
             is_auth_required=True,
-            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
+            limit_id=CONSTANTS.ORDER_PATH_URL)
 
         if "result" not in order_result or order_result["result"] is None:
             raise IOError(f"Error submitting order to XT. API response: {order_result}")
@@ -212,7 +212,7 @@ class XtExchange(ExchangePyBase):
             path_url=CONSTANTS.ORDER_PATH_URL,
             params=api_params,
             is_auth_required=True,
-            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
+            limit_id=CONSTANTS.ORDER_PATH_URL)
 
 
     async def _execute_order_cancel(self, order: InFlightOrder) -> str:
@@ -469,7 +469,7 @@ class XtExchange(ExchangePyBase):
                 "orderId": int(exchange_order_id),
                 "clientOrderId": client_order_id},
             is_auth_required=True,
-            limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
+            limit_id=CONSTANTS.ORDER_PATH_URL)
 
         # order update might've already come through user stream listner
         # and order might no longer be available on the exchange.
