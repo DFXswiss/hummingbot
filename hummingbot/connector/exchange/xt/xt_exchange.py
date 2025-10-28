@@ -200,7 +200,6 @@ class XtExchange(ExchangePyBase):
         o_id = str(order_result["result"]["orderId"])
         transact_time = self.current_timestamp
 
-        await asyncio.sleep(0.2)
 
         return (o_id, transact_time)
 
@@ -215,7 +214,6 @@ class XtExchange(ExchangePyBase):
             is_auth_required=True,
             limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
 
-        await asyncio.sleep(0.2)
 
     async def _execute_order_cancel(self, order: InFlightOrder) -> str:
         try:
@@ -503,7 +501,6 @@ class XtExchange(ExchangePyBase):
             is_auth_required=True,
             limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
 
-        await asyncio.sleep(0.2)
 
         if "result" not in account_info or account_info["result"] is None:
             raise IOError(f"Error fetching account updates. API response: {account_info}")
