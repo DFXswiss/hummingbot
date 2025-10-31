@@ -45,7 +45,7 @@ send_error_logs: true
 
 # Advanced database options, currently supports SQLAlchemy's included dialects
 # Reference: https://docs.sqlalchemy.org/en/13/dialects/
-# To use an instance of SQLite DB the required configuration is
+# To use an instance of SQLite DB the required configuration is 
 #   db_engine: sqlite
 # To use a DBMS the required configuration is
 #   db_host: 127.0.0.1
@@ -125,7 +125,7 @@ global_token:
   global_token_symbol: $
 
 # Percentage of API rate limits (on any exchange and any end point) allocated to this bot instance.
-# Enter 50 to indicate 50%. E.g. if the API rate limit is 100 calls per second, and you allocate
+# Enter 50 to indicate 50%. E.g. if the API rate limit is 100 calls per second, and you allocate 
 # 50% to this setting, the bot will have a maximum (limit) of 50 calls per second
 rate_limits_share_pct: 100.0
 
@@ -170,7 +170,7 @@ color:
   bronze_label: '#CD7F32'
 
 # The tick size is the frequency with which the clock notifies the time iterators by calling the
-# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy
+# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy 
 # will run every second.
 tick_size: 1.0
 
