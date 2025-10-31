@@ -1,4 +1,4 @@
-id: keep_market_pmm_126345
+id: keep_market_pmm_d345
 controller_name: keep_market_pmm
 controller_type: custom
 total_amount_quote: '0.0000991650'
@@ -7,5 +7,5 @@ candles_config: []
 initial_positions: []
 update_interval: 5.0
 trading_connector: xt
-trading_pair: DEURO-BTC
+trading_pair: DEPS-BTC
 order_amount_quote: '0.0000991650'

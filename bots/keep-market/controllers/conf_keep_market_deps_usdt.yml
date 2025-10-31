@@ -1,11 +1,11 @@
 id: keep_market_pmm_2
 controller_name: keep_market_pmm
 controller_type: custom
-total_amount_quote: '30'
+total_amount_quote: '10'
 manual_kill_switch: false
 candles_config: []
 initial_positions: []
 update_interval: 5.0
 trading_connector: xt
-trading_pair: DEURO-USDT
-order_amount_quote: '30'
+trading_pair: DEPS-USDT
+order_amount_quote: '10'

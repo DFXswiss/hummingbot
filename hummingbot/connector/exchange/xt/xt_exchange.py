@@ -394,26 +394,95 @@ class XtExchange(ExchangePyBase):
 
     async def _update_orders(self):
         orders_to_update = self.in_flight_orders.copy()
-        for client_order_id, order in orders_to_update.items():
+        
+        # Collect orders with exchange IDs
+        orders_with_exchange_ids = []
+        orders_without_exchange_ids = []
+        
+        for order in orders_to_update.values():
+            if order.exchange_order_id:
+                orders_with_exchange_ids.append(order)
+            else:
+                orders_without_exchange_ids.append(order)
+        
+        # Handle orders without exchange IDs (similar to old method's TimeoutError handling)
+        for order in orders_without_exchange_ids:
+            self.logger().debug(
+                f"Tracked order {order.client_order_id} does not have an exchange id. "
+                f"Attempting fetch in next polling interval."
+            )
+            await self._order_tracker.process_order_not_found(order.client_order_id)
+        
+        if len(orders_with_exchange_ids) == 0:
+            return
+        
+        chunk_size = 20
+        order_chunks = [orders_with_exchange_ids[i:i + chunk_size] for i in range(0, len(orders_with_exchange_ids), chunk_size)]
+        
+        for chunk in order_chunks:
             try:
-                order_update = await self._request_order_status(tracked_order=order)
-                if client_order_id in self.in_flight_orders and order_update is not None:
-                    self._order_tracker.process_order_update(order_update)
-            except asyncio.CancelledError:
-                raise
-            except asyncio.TimeoutError:
-                self.logger().debug(
-                    f"Tracked order {client_order_id} does not have an exchange id. "
-                    f"Attempting fetch in next polling interval."
-                )
-                await self._order_tracker.process_order_not_found(client_order_id)
-            except Exception as request_error:
-                self.logger().network(
-                    f"Error fetching status update for the order {order.client_order_id}: {request_error}.",
-                    app_warning_msg=f"Failed to fetch status update for the order {order.client_order_id}.",
-                )
-                await self._order_tracker.process_order_not_found(order.client_order_id)
+                exchange_order_ids = ",".join([str(int(order.exchange_order_id)) for order in chunk])
+                
+                response = await self._api_get(
+                    path_url=CONSTANTS.BATCH_ORDER_PATH_URL,
+                    params={
+                        "orderIds": exchange_order_ids
+                    },
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.BATCH_ORDER_PATH_URL)
+                
+                if "result" not in response or response["result"] is None:
+                    # Handle as not found for all orders in this chunk
+                    for order in chunk:
+                        self.logger().network(
+                            f"No result returned for order {order.client_order_id}",
+                            app_warning_msg=f"Failed to fetch status update for the order {order.client_order_id}.",
+                        )
+                        await self._order_tracker.process_order_not_found(order.client_order_id)
+                    continue
 
+                result_updates = response["result"]
+                
+                # Track which orders were found in the response
+                found_order_ids = set()
+                
+                for result_update in result_updates:
+                    if result_update is not None:
+                        client_order_id = result_update["clientOrderId"]
+                        found_order_ids.add(client_order_id)
+                        
+                        if client_order_id in self.in_flight_orders:
+                            order_update = OrderUpdate(
+                                trading_pair=self.in_flight_orders[client_order_id].trading_pair,
+                                update_timestamp=(result_update["updatedTime"] * 1e-3) if "updatedTime" in result_update and result_update["updatedTime"] is not None else None,
+                                new_state=CONSTANTS.ORDER_STATE[result_update["state"]],
+                                client_order_id=client_order_id,
+                                exchange_order_id=str(result_update["orderId"]),
+                            )
+                            self._order_tracker.process_order_update(order_update)
+                
+                # Handle orders that weren't found in the response
+                for order in chunk:
+                    if order.client_order_id not in found_order_ids:
+                        self.logger().network(
+                            f"Order {order.client_order_id} not found in batch response.",
+                            app_warning_msg=f"Failed to fetch status update for the order {order.client_order_id}.",
+                        )
+                        await self._order_tracker.process_order_not_found(order.client_order_id)
+            
+            except asyncio.CancelledError:
+                # Critical: re-raise to allow proper async cleanup
+                raise
+            except Exception as e:
+                # Handle errors for all orders in this chunk
+                self.logger().error(f"Error updating order batch: {e}")
+                for order in chunk:
+                    self.logger().network(
+                        f"Error fetching status update for the order {order.client_order_id}: {e}.",
+                        app_warning_msg=f"Failed to fetch status update for the order {order.client_order_id}.",
+                    )
+                    await self._order_tracker.process_order_not_found(order.client_order_id)
+        
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
 
