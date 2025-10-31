@@ -24,6 +24,7 @@ SERVER_TIME_PATH_URL = "/public/time"
 ACCOUNTS_PATH_URL = "/balances"
 MY_TRADES_PATH_URL = "/trade"
 ORDER_PATH_URL = "/order"
+BATCH_ORDER_PATH_URL = "/batch-order"
 OPEN_ORDER_PATH_URL = "open-order"
 GET_ACCOUNT_LISTENKEY = "/ws-token"
 
@@ -77,4 +78,5 @@ GLOBAL_RATE_LIMIT = "GlobalRateLimit"
 RATE_LIMITS = [
     RateLimit(limit_id=GLOBAL_RATE_LIMIT, limit=20, time_interval=ONE_SECOND),
     RateLimit(limit_id=ORDER_PATH_URL, limit=20, time_interval=ONE_SECOND),
+    RateLimit(limit_id=BATCH_ORDER_PATH_URL, limit=20, time_interval=ONE_SECOND),
 ]

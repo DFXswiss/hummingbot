@@ -39,7 +39,7 @@ max_order_age: 86400.0
 order_refresh_tolerance_pct: 0.05
 
 # Size of your bid and ask order.
-order_amount: 200.0
+order_amount: 125.0
 
 # Price band ceiling.
 price_ceiling: -1.0
@@ -76,7 +76,7 @@ inventory_range_multiplier: 1.0
 inventory_price: 1.0
 
 # Number of levels of orders to place on each side of the order book.
-order_levels: 5
+order_levels: 6
 
 # Increase or decrease size of consecutive orders after the first order (if order_levels > 1).
 order_level_amount: 0
@@ -148,7 +148,7 @@ bid_order_level_amounts:
 ask_order_level_amounts:
 
 # If the strategy should wait to receive cancellations confirmation before creating new orders during refresh time
-should_wait_order_cancel_confirmation: false
+should_wait_order_cancel_confirmation: true
 
 # Use CoinGecko as rate oracle source
 rate_oracle_source: coin_gecko
