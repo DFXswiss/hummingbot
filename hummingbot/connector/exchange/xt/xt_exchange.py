@@ -11,6 +11,7 @@ from hummingbot.connector.exchange.xt import xt_constants as CONSTANTS, xt_utils
 from hummingbot.connector.exchange.xt.xt_api_order_book_data_source import XtAPIOrderBookDataSource
 from hummingbot.connector.exchange.xt.xt_api_user_stream_data_source import XtAPIUserStreamDataSource
 from hummingbot.connector.exchange.xt.xt_auth import XtAuth
+from hummingbot.connector.exchange.xt.xt_batch_order_status import BatchOrderStatusRequest
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.connector.utils import combine_to_hb_trading_pair
@@ -33,8 +34,8 @@ s_logger = None
 class XtExchange(ExchangePyBase):
     # XT depends on REST API to get trade fills
     # keeping short/long poll intervals 1 second to poll regularly for trade updates.
-    SHORT_POLL_INTERVAL = 1.0
-    LONG_POLL_INTERVAL = 1.0
+    SHORT_POLL_INTERVAL = 5.0
+    LONG_POLL_INTERVAL = 12.0
 
     web_utils = web_utils
 
@@ -52,6 +53,13 @@ class XtExchange(ExchangePyBase):
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
         super().__init__(client_config_map)
+        
+        # Initialize batch order status request handler for debouncing
+        self._batch_order_status_handler = BatchOrderStatusRequest(self)
+        
+        # Initialize timer for periodic tracked orders logging
+        self._last_tracked_orders_log_time = 0
+        self._tracked_orders_log_interval = 300  # 5 minutes in seconds
 
     @staticmethod
     def xt_order_type(order_type: OrderType) -> str:
@@ -188,6 +196,7 @@ class XtExchange(ExchangePyBase):
         if order_type == OrderType.LIMIT:
             api_params["timeInForce"] = CONSTANTS.TIME_IN_FORCE_GTC
 
+        self.logger().info(f"[REST PLACE ORDER] _place_order called - order_id: {order_id}, symbol: {symbol}, side: {side_str}, type: {type_str}, amount: {amount_str}, price: {price_str}")
         order_result = await self._api_post(
             path_url=CONSTANTS.ORDER_PATH_URL,
             data=api_params,
@@ -208,6 +217,7 @@ class XtExchange(ExchangePyBase):
         api_params = {
             "orderId": ex_order_id,
         }
+        self.logger().info(f"[REST CANCEL ORDER] _place_cancel called - client_order_id: {order_id}, exchange_order_id: {ex_order_id}")
         await self._api_delete(
             path_url=CONSTANTS.ORDER_PATH_URL,
             params=api_params,
@@ -392,7 +402,27 @@ class XtExchange(ExchangePyBase):
                 self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
                 await self._sleep(5.0)
 
+    def _log_tracked_orders_if_needed(self):
+        """Log all tracked order IDs every ~5 minutes"""
+        current_time = self.current_timestamp
+        if current_time - self._last_tracked_orders_log_time >= self._tracked_orders_log_interval:
+            all_orders = list(self.in_flight_orders.values())
+            if all_orders:
+                order_ids = [f"{o.client_order_id} (ex_id: {o.exchange_order_id}, state: {o.current_state.name})" 
+                            for o in all_orders]
+                self.logger().info(
+                    f"[TRACKED ORDERS] {len(all_orders)} orders being tracked: {', '.join(order_ids)}"
+                )
+            else:
+                self.logger().info("[TRACKED ORDERS] No orders being tracked")
+            self._last_tracked_orders_log_time = current_time
+
     async def _update_orders(self):
+        self.logger().info(f"[REST BATCH ORDER] _update_orders called - orders to update: {len(self.in_flight_orders)}")
+        
+        # Log all tracked orders periodically
+        self._log_tracked_orders_if_needed()
+        
         orders_to_update = self.in_flight_orders.copy()
         
         # Collect orders with exchange IDs
@@ -423,6 +453,7 @@ class XtExchange(ExchangePyBase):
             try:
                 exchange_order_ids = ",".join([str(int(order.exchange_order_id)) for order in chunk])
                 
+                self.logger().info(f"[REST BATCH ORDER STATUS] Fetching batch status - chunk_size: {len(chunk)}, order_ids: {exchange_order_ids}")
                 response = await self._api_get(
                     path_url=CONSTANTS.BATCH_ORDER_PATH_URL,
                     params={
@@ -491,6 +522,7 @@ class XtExchange(ExchangePyBase):
         if order.client_order_id not in self._order_tracker.cached_orders:
             exchange_order_id = await order.get_exchange_order_id()
             trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=order.trading_pair)
+            self.logger().info(f"[REST TRADES] _all_trade_updates_for_order called - client_order_id: {order.client_order_id}, exchange_order_id: {exchange_order_id}, symbol: {trading_pair}")
             response = await self._api_get(
                 path_url=CONSTANTS.MY_TRADES_PATH_URL,
                 params={
@@ -530,8 +562,10 @@ class XtExchange(ExchangePyBase):
         return trade_updates
 
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
+        #return await self._batch_order_status_handler.request_order_status(tracked_order)
         client_order_id = tracked_order.client_order_id
         exchange_order_id = await tracked_order.get_exchange_order_id()
+        self.logger().info(f"[REST ORDER STATUS] _request_order_status called - client_order_id: {client_order_id}, exchange_order_id: {exchange_order_id}")
         response = await self._api_get(
             path_url=CONSTANTS.ORDER_PATH_URL,
             params={
@@ -565,6 +599,7 @@ class XtExchange(ExchangePyBase):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
 
+        self.logger().info(f"[REST BALANCES] _update_balances called")
         account_info = await self._api_get(
             path_url=CONSTANTS.ACCOUNTS_PATH_URL,
             is_auth_required=True,
@@ -600,6 +635,7 @@ class XtExchange(ExchangePyBase):
             "symbol": await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         }
 
+        self.logger().info(f"[REST TICKER] _get_last_traded_price called - trading_pair: {trading_pair}, symbol: {params['symbol']}")
         resp_json = await self._api_request(
             method=RESTMethod.GET,
             path_url=CONSTANTS.TICKER_PRICE_CHANGE_PATH_URL,
@@ -613,6 +649,7 @@ class XtExchange(ExchangePyBase):
         """
         Get all pending orders for the current spot trading pair.
         """
+        self.logger().info(f"[REST OPEN ORDERS] _get_open_orders called - trading_pairs: {len(self._trading_pairs)}")
         tasks = []
         for trading_pair in self._trading_pairs:
 
@@ -641,6 +678,7 @@ class XtExchange(ExchangePyBase):
 
     async def _make_network_check_request(self):
         """Override to use global rate limit for network check requests."""
+        self.logger().info(f"[REST NETWORK CHECK] _make_network_check_request called")
         await self._api_get(
             path_url=self.check_network_request_path,
             limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
@@ -648,6 +686,7 @@ class XtExchange(ExchangePyBase):
 
     async def _make_trading_rules_request(self) -> Any:
         """Override to use global rate limit for trading rules requests."""
+        self.logger().info(f"[REST TRADING RULES] _make_trading_rules_request called")
         exchange_info = await self._api_get(
             path_url=self.trading_rules_request_path,
             limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
@@ -656,6 +695,7 @@ class XtExchange(ExchangePyBase):
 
     async def _make_trading_pairs_request(self) -> Any:
         """Override to use global rate limit for trading pairs requests."""
+        self.logger().info(f"[REST TRADING PAIRS] _make_trading_pairs_request called")
         exchange_info = await self._api_get(
             path_url=self.trading_pairs_request_path,
             limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
