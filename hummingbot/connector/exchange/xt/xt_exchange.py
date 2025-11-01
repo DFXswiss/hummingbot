@@ -12,6 +12,7 @@ from hummingbot.connector.exchange.xt.xt_api_order_book_data_source import XtAPI
 from hummingbot.connector.exchange.xt.xt_api_user_stream_data_source import XtAPIUserStreamDataSource
 from hummingbot.connector.exchange.xt.xt_auth import XtAuth
 from hummingbot.connector.exchange.xt.xt_batch_order_status import BatchOrderStatusRequest
+from hummingbot.connector.exchange.xt.xt_batch_order_handler import BatchOrderHandler
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.connector.utils import combine_to_hb_trading_pair
@@ -56,6 +57,9 @@ class XtExchange(ExchangePyBase):
         
         # Initialize batch order status request handler for debouncing
         self._batch_order_status_handler = BatchOrderStatusRequest(self)
+        
+        # Initialize batch order handler for place/cancel orders
+        self._batch_order_handler = BatchOrderHandler(self)
         
         # Initialize timer for periodic tracked orders logging
         self._last_tracked_orders_log_time = 0
@@ -180,49 +184,25 @@ class XtExchange(ExchangePyBase):
                            order_type: OrderType,
                            price: Decimal,
                            **kwargs) -> Tuple[str, float]:
-        order_result = None
-        amount_str = f"{amount:f}"
-        price_str = f"{price:f}"
-        type_str = XtExchange.xt_order_type(order_type)
-        side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
-        symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-        api_params = {"symbol": symbol,
-                      "side": side_str,
-                      "quantity": amount_str,
-                      "type": type_str,
-                      "clientOrderId": order_id,
-                      "bizType": "SPOT",
-                      "price": price_str}
-        if order_type == OrderType.LIMIT:
-            api_params["timeInForce"] = CONSTANTS.TIME_IN_FORCE_GTC
-
-        self.logger().info(f"[REST PLACE ORDER] _place_order called - order_id: {order_id}, symbol: {symbol}, side: {side_str}, type: {type_str}, amount: {amount_str}, price: {price_str}")
-        order_result = await self._api_post(
-            path_url=CONSTANTS.ORDER_PATH_URL,
-            data=api_params,
-            is_auth_required=True,
-            limit_id=CONSTANTS.ORDER_PATH_URL)
-
-        if "result" not in order_result or order_result["result"] is None:
-            raise IOError(f"Error submitting order to XT. API response: {order_result}")
-
-        o_id = str(order_result["result"]["orderId"])
-        transact_time = self.current_timestamp
-
-
-        return (o_id, transact_time)
+        # Use batch handler for debounced/batched order placement
+        return await self._batch_order_handler.place_order(
+            order_id=order_id,
+            trading_pair=trading_pair,
+            amount=amount,
+            trade_type=trade_type,
+            order_type=order_type,
+            price=price,
+            **kwargs
+        )
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
+        self._log_tracked_orders_if_needed()
         ex_order_id = await tracked_order.get_exchange_order_id()
-        api_params = {
-            "orderId": ex_order_id,
-        }
-        self.logger().info(f"[REST CANCEL ORDER] _place_cancel called - client_order_id: {order_id}, exchange_order_id: {ex_order_id}")
-        await self._api_delete(
-            path_url=CONSTANTS.ORDER_PATH_URL,
-            params=api_params,
-            is_auth_required=True,
-            limit_id=CONSTANTS.ORDER_PATH_URL)
+        # Use batch handler for debounced/batched order cancellation
+        await self._batch_order_handler.cancel_order(
+            order_id=order_id,
+            exchange_order_id=ex_order_id
+        )
 
 
     async def _execute_order_cancel(self, order: InFlightOrder) -> str:

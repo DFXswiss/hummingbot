@@ -24,10 +24,12 @@ class XtAuth(AuthBase):
         """
         endpoint_url = request.url.split(CONSTANTS.PRIVATE_API_VERSION)[1]
         path = f"/{CONSTANTS.PRIVATE_API_VERSION}{endpoint_url}"
-        if request.method == RESTMethod.GET or request.method == RESTMethod.DELETE:
+        # For GET, or DELETE without body data, use params
+        if request.method == RESTMethod.GET or (request.method == RESTMethod.DELETE and request.data is None):
             params_str = urlencode(dict(sorted(request.params.items(), key=lambda kv: (kv[0], kv[1]))), safe=",") \
                 if request.params is not None else request.params
             headers = self.add_auth_to_headers(method=request.method, path=path, params_str=params_str)
+        # For POST, PUT, or DELETE with body data, use data
         else:
             headers = self.add_auth_to_headers(method=request.method, path=path, params_str=request.data)
 
