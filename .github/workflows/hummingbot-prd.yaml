@@ -4,6 +4,15 @@ on:
   push:
     branches: [system-recovery]
   workflow_dispatch:
+    inputs:
+      clean_start:
+        description: 'Clean data folder on startup (true/false)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 env:
   CRYPTO_PAIR_01: deuro-usdt
@@ -15,6 +24,7 @@ env:
   AZURE_STORAGE_ACCOUNT_NAME: stdfxapiprd
   AZURE_WORKSPACE_NAME: log-dfx-api-prd
   DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
+  CLEAN_START: ${{ github.event.inputs.clean_start || 'true' }}
 
 jobs:
   build-and-deploy:
@@ -83,6 +93,7 @@ jobs:
           LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          CLEAN_START: ${{ env.CLEAN_START }}
 
       - name: Render deployment YAML for CRYPTO_PAIR_02
         uses: nowactions/envsubst@v1
@@ -97,6 +108,7 @@ jobs:
           LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          CLEAN_START: ${{ env.CLEAN_START }}
 
       - name: Render deployment YAML for CRYPTO_PAIR_03
         uses: nowactions/envsubst@v1
@@ -111,6 +123,7 @@ jobs:
           LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          CLEAN_START: ${{ env.CLEAN_START }}
 
       - name: Render deployment YAML for CRYPTO_PAIR_04
         uses: nowactions/envsubst@v1
@@ -125,6 +138,7 @@ jobs:
           LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          CLEAN_START: ${{ env.CLEAN_START }}
 
       - name: Stop Azure Container Instance
         run: |

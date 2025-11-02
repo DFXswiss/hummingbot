@@ -19,6 +19,8 @@ properties:
             value: "${CRYPTO_PAIR}-conf_pure_mm.yml"
           - name: DEPLOY_INFO
             value: "${DEPLOY_INFO}"
+          - name: CLEAN_START
+            value: "${CLEAN_START:-true}"
         volumeMounts:
           - name: volume
             mountPath: /mnt/hummingbot

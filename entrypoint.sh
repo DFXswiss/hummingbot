@@ -12,6 +12,15 @@ ln -sf /mnt/hummingbot/conf /home/hummingbot
 ln -sf /mnt/hummingbot/data /home/hummingbot
 ln -sf /mnt/hummingbot/logs /home/hummingbot
 
+# Optional: Clean data folder if CLEAN_START=true
+cleanStart=`printenv CLEAN_START`
+if [[ "$cleanStart" == "true" ]]
+then
+  echo "$(date): CLEAN_START enabled - removing old data" >> $myLogFile
+  rm -rf /mnt/hummingbot/data/*
+  echo "$(date): Data folder cleaned" >> $myLogFile
+fi
+
 # Setup the configuration
 botDir=`printenv BOT_DIR`
 
