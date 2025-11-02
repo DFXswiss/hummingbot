@@ -386,30 +386,6 @@ class XtExchange(ExchangePyBase):
         """Log all tracked order IDs every ~5 minutes"""
         current_time = self.current_timestamp
 
-        orders_to_update = self.in_flight_orders.copy()
-        
-        # Only cleanup if there are more than 1000 orders
-        if len(orders_to_update) > 300:
-            orders_to_force_complete = []
-            for order in orders_to_update.values():
-                order_age = current_time - order.creation_timestamp
-                if order_age > 300:  # 5 minutes
-                    orders_to_force_complete.append(order)
-            
-            for order in orders_to_force_complete:
-                self.logger().warning(
-                    f"Force completing stale order {order.client_order_id} - age: {current_time - order.creation_timestamp:.0f}s, state: {order.current_state.name}"
-                )
-                # Mark as failed so it gets removed from tracking
-                order_update = OrderUpdate(
-                    trading_pair=order.trading_pair,
-                    update_timestamp=current_time,
-                    new_state=OrderState.FAILED,
-                    client_order_id=order.client_order_id,
-                    exchange_order_id=order.exchange_order_id,
-                )
-                self._order_tracker.process_order_update(order_update)
-
         if current_time - self._last_tracked_orders_log_time >= self._tracked_orders_log_interval:
             all_orders = list(self.in_flight_orders.values())
 
