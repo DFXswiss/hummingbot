@@ -35,8 +35,8 @@ s_logger = None
 class XtExchange(ExchangePyBase):
     # XT depends on REST API to get trade fills
     # keeping short/long poll intervals 1 second to poll regularly for trade updates.
-    SHORT_POLL_INTERVAL = 5.0
-    LONG_POLL_INTERVAL = 12.0
+    SHORT_POLL_INTERVAL =2.0
+    LONG_POLL_INTERVAL = 2.0
 
     web_utils = web_utils
 
