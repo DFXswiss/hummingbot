@@ -305,8 +305,8 @@ class BatchOrderHandler:
                     f"[BATCH CANCEL ORDER RESPONSE] API result: {result}"
                 )
                 
-                # Check if the response indicates success
-                if "result" in result and result["result"] is not None:
+                # Check if the response indicates success (rc: 0 means success, even if result is None)
+                if result.get("rc") == 0:
                     self._exchange.logger().info(
                         f"[BATCH CANCEL ORDER RESPONSE] Success for {len(batch)} cancellations"
                     )
@@ -315,7 +315,7 @@ class BatchOrderHandler:
                         if not future.done():
                             future.set_result(None)
                 else:
-                    # API returned an error or no result
+                    # API returned an error
                     error_msg = f"Batch cancel failed. API response: {result}"
                     self._exchange.logger().error(f"[BATCH CANCEL ORDER ERROR] {error_msg}")
                     error = IOError(error_msg)
