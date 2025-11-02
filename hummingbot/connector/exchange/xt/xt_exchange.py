@@ -389,11 +389,11 @@ class XtExchange(ExchangePyBase):
         orders_to_update = self.in_flight_orders.copy()
         
         # Only cleanup if there are more than 1000 orders
-        if len(orders_to_update) > 1000:
+        if len(orders_to_update) > 300:
             orders_to_force_complete = []
             for order in orders_to_update.values():
                 order_age = current_time - order.creation_timestamp
-                if order_age > 3600:  # 1 hour
+                if order_age > 300:  # 5 minutes
                     orders_to_force_complete.append(order)
             
             for order in orders_to_force_complete:
