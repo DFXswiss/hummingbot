@@ -27,8 +27,8 @@ class BatchOrderHandler:
         self._cancel_flushing = False
         
         # Configuration
-        self._batch_size = 50
-        self._debounce_time = 0.5  # 300ms
+        self._batch_size = 20
+        self._debounce_time = 0.3  # 300ms
     
     async def place_order(self,
                          order_id: str,
