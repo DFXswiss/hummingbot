@@ -29,8 +29,7 @@ SHELL [ "/bin/bash", "-lc" ]
 RUN echo "conda activate hummingbot" >> ~/.bashrc
 
 COPY setup/pip_packages.txt /tmp/pip_packages.txt
-RUN conda run -n hummingbot pip install commlib-py[all]>=0.11 && \
-    conda run -n hummingbot pip install --no-deps -r /tmp/pip_packages.txt && \
+RUN python3 -m pip install --no-deps -r /tmp/pip_packages.txt && \
     rm /tmp/pip_packages.txt
 
 
