@@ -61,7 +61,7 @@ ENV INSTALLATION_TYPE=docker
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y sudo libusb-1.0 && \
+    apt-get install -y sudo libusb-1.0 mosquitto && \
     rm -rf /var/lib/apt/lists/*
 
 # Create mount points
@@ -75,6 +75,9 @@ COPY --from=builder /home/ /home/
 
 # Copy all bots into the workdir
 COPY bots/ bots/
+
+# Copy Mosquitto config
+COPY mosquitto/config/mosquitto.conf /etc/mosquitto/mosquitto.conf
 
 # Setting bash as default shell because we have .bashrc with customized PATH (setting SHELL affects RUN, CMD and ENTRYPOINT, but not manual commands e.g. `docker run image COMMAND`!)
 SHELL [ "/bin/bash", "-lc" ]

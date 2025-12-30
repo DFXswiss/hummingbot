@@ -6,6 +6,12 @@ myLogFile=/mnt/hummingbot/logs/entrypoint.log
 echo "$(date): ------------------------" >> $myLogFile
 echo "$(date): Entrypoint of Hummingbot" >> $myLogFile
 
+# Start Mosquitto MQTT broker in background
+echo "$(date): Starting Mosquitto MQTT broker" >> $myLogFile
+mosquitto -c /etc/mosquitto/mosquitto.conf -d
+sleep 2
+echo "$(date): Mosquitto MQTT broker started" >> $myLogFile
+
 echo "$(date): Create symbolic links" >> $myLogFile
 ln -sf /mnt/hummingbot/certs /home/hummingbot
 ln -sf /mnt/hummingbot/conf /home/hummingbot
