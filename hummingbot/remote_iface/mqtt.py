@@ -824,8 +824,9 @@ class MQTTGateway(Node):
         self._stop_event_async.set()
 
     def start(self, with_health: bool = True) -> None:
-        if self._hb_app.client_config_map.mqtt_bridge.mqtt_logger:
-            self._init_logger()
+        # TODO: Uncomment this when we have a way to test it
+        #if self._hb_app.client_config_map.mqtt_bridge.mqtt_logger:
+        #    self._init_logger()
         self._init_notifier()
         self._init_status_updates()
         self._init_commands()
