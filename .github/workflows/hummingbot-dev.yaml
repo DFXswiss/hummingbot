@@ -2,13 +2,10 @@ name: Hummingbot DEV CI/CD
 
 on:
   push:
-    branches: [develop]
+    branches: [another-image]
   workflow_dispatch:
 
 env:
-  CRYPTO_PAIR_01: deuro-usdt
-  CRYPTO_PAIR_02: deuro-btc
-  CRYPTO_PAIR_03: deps-usdt
   CRYPTO_PAIR_04: deps-btc
   DOCKER_TAGS: dfxswiss/hummingbot:beta
   AZURE_RESOURCE_GROUP: rg-dfx-api-dev
@@ -70,48 +67,6 @@ jobs:
           echo "LOG_WORKSPACE_ID=$LOG_WORKSPACE_ID" >> $GITHUB_ENV
           echo "LOG_WORKSPACE_KEY=$LOG_WORKSPACE_KEY" >> $GITHUB_ENV
 
-      - name: Render deployment YAML for CRYPTO_PAIR_01
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-dev.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-dev.yaml
-        env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_01 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Render deployment YAML for CRYPTO_PAIR_02
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-dev.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-dev.yaml
-        env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_02 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Render deployment YAML for CRYPTO_PAIR_03
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-dev.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_03 }}-dev.yaml
-        env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_03 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
       - name: Render deployment YAML for CRYPTO_PAIR_04
         uses: nowactions/envsubst@v1
         with:
@@ -128,23 +83,14 @@ jobs:
 
       - name: Stop Azure Container Instance
         run: |
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev
           az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev
 
       - name: Delete Azure Container Instance
         run: |
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev --yes
           az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev --yes
 
       - name: Deploy container instance
         run: |
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-dev.yaml
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-dev.yaml
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_03 }}-dev.yaml
           az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_04 }}-dev.yaml
 
       - name: Logout from Azure
