@@ -824,9 +824,7 @@ class MQTTGateway(Node):
         self._stop_event_async.set()
 
     def start(self, with_health: bool = True) -> None:
-        # TODO: Uncomment this when we have a way to test it
-        #if self._hb_app.client_config_map.mqtt_bridge.mqtt_logger:
-        #    self._init_logger()
+        self._init_logger()
         self._init_notifier()
         self._init_status_updates()
         self._init_commands()
@@ -891,7 +889,11 @@ class MQTTLogHandler(logging.Handler):
             logger_name=record.name
 
         )
-        self.log_pub.publish(msg)
+        try:
+            self.log_pub.publish(msg)
+        except (AttributeError, Exception):
+            # Silently ignore MQTT publish failures - don't crash logging
+            pass
 
 
 class MQTTExternalEvents:
