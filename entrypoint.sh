@@ -10,7 +10,36 @@ echo "$(date): Entrypoint of Hummingbot" >> $myLogFile
 echo "$(date): Starting Mosquitto MQTT broker" >> $myLogFile
 mosquitto -c /etc/mosquitto/mosquitto.conf -d
 sleep 2
-echo "$(date): Mosquitto MQTT broker started" >> $myLogFile
+
+# Verify Mosquitto is running
+if pgrep mosquitto > /dev/null; then
+    MQTT_PID=$(pgrep mosquitto)
+    echo "$(date): Mosquitto MQTT broker started successfully (PID: $MQTT_PID)" >> $myLogFile
+    
+    # Check if it's actually listening on port 1883
+    sleep 1
+    if grep -q "0100007F:075B" /proc/net/tcp; then
+        echo "$(date): Mosquitto is listening on localhost:1883" >> $myLogFile
+    else
+        echo "$(date): WARNING: Mosquitto running but not listening on localhost:1883!" >> $myLogFile
+        echo "$(date): Network table:" >> $myLogFile
+        cat /proc/net/tcp >> $myLogFile 2>&1
+    fi
+    
+    # Wait for Mosquitto to be fully ready to accept connections
+    sleep 2
+    echo "$(date): Mosquitto ready for connections" >> $myLogFile
+else
+    echo "$(date): ERROR: Mosquitto failed to start!" >> $myLogFile
+    echo "$(date): Attempting to start Mosquitto in verbose mode..." >> $myLogFile
+    mosquitto -c /etc/mosquitto/mosquitto.conf -v >> $myLogFile 2>&1 &
+    sleep 3
+    if pgrep mosquitto > /dev/null; then
+        echo "$(date): Mosquitto started in verbose mode (PID: $(pgrep mosquitto))" >> $myLogFile
+    else
+        echo "$(date): CRITICAL: Mosquitto failed to start even in verbose mode!" >> $myLogFile
+    fi
+fi
 
 echo "$(date): Create symbolic links" >> $myLogFile
 ln -sf /mnt/hummingbot/certs /home/hummingbot
