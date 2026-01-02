@@ -7,7 +7,7 @@ properties:
   containers:
     - name: "hb-${CRYPTO_PAIR}"
       properties:
-        image: dfxswiss/hummingbot:beta
+        image: danswar101/hummingbot:latest
         resources:
           requests:
             cpu: 0.5
