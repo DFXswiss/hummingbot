@@ -21,6 +21,7 @@ from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.strategy.order_book_asset_price_delegate cimport OrderBookAssetPriceDelegate
 from hummingbot.strategy.strategy_base import StrategyBase
 from hummingbot.strategy.utils import order_age
+from hummingbot.connector.utils import get_new_client_order_id
 from .data_types import PriceSize, Proposal
 from .inventory_cost_price_delegate import InventoryCostPriceDelegate
 from .inventory_skew_calculator cimport c_calculate_bid_ask_ratios_from_base_asset_ratio
@@ -756,6 +757,7 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                                           f"making may be dangerous when markets or networks are unstable.")
 
             proposal = None
+            
             if self._create_timestamp <= self._current_timestamp:
                 # 1. Create base order proposals
                 proposal = self.c_create_base_proposal()
@@ -773,8 +775,8 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
 
             self._hanging_orders_tracker.process_tick()
 
-            self.c_cancel_active_orders_on_max_age_limit()
-            self.c_process_orders_sequentially(proposal)
+            # self.c_cancel_active_orders_on_max_age_limit()
+            self.c_process_orders_proposal(proposal)
             self.c_cancel_orders_below_min_spread()
         finally:
             self._last_timestamp = timestamp
@@ -797,42 +799,64 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                 if base_balance > 0:
                     raise RuntimeError("Initial inventory price is not set while inventory_cost feature is active.")
 
-        # First to check if a customized order override is configured, otherwise the proposal will be created according
-        # to order spread, amount, and levels setting.
-        order_override = self._order_override
-        if order_override is not None and len(order_override) > 0:
-            for key, value in order_override.items():
-                if str(value[0]) in ["buy", "sell"]:
-                    if str(value[0]) == "buy" and not buy_reference_price.is_nan():
-                        price = buy_reference_price * (Decimal("1") - Decimal(str(value[1])) / Decimal("100"))
-                        price = market.c_quantize_order_price(self.trading_pair, price)
-                        size = Decimal(str(value[2]))
-                        size = market.c_quantize_order_amount(self.trading_pair, size)
-                        if size > 0 and price > 0:
-                            buys.append(PriceSize(price, size))
-                    elif str(value[0]) == "sell" and not sell_reference_price.is_nan():
-                        price = sell_reference_price * (Decimal("1") + Decimal(str(value[1])) / Decimal("100"))
-                        price = market.c_quantize_order_price(self.trading_pair, price)
-                        size = Decimal(str(value[2]))
-                        size = market.c_quantize_order_amount(self.trading_pair, size)
-                        if size > 0 and price > 0:
-                            sells.append(PriceSize(price, size))
-        else:
-            if not buy_reference_price.is_nan():
-                for level in range(0, self._buy_levels):
-                    price = buy_reference_price * (Decimal("1") - self._bid_spread - (level * self._order_level_spread))
-                    price = market.c_quantize_order_price(self.trading_pair, price)
-                    size = self._order_amount + (self._order_level_amount * level)
-                    size = market.c_quantize_order_amount(self.trading_pair, size)
-                    if size > 0:
+        # Get orderbook entries (already sorted: bids high->low, asks low->high)
+        orderbook_bids = list(self._market_info.order_book_bid_entries())
+        orderbook_asks = list(self._market_info.order_book_ask_entries())
+        used_bid_indices = set()
+        used_ask_indices = set()
+        
+        # Create buy orders
+        if not buy_reference_price.is_nan():
+            for level in range(0, self._buy_levels):
+                price = buy_reference_price * (Decimal("1") - self._bid_spread - (level * self._order_level_spread))
+                price = market.c_quantize_order_price(self.trading_pair, price)
+                size = self._order_amount + (self._order_level_amount * level)
+                size = market.c_quantize_order_amount(self.trading_pair, size)
+                
+                if size > 0:
+                    # Check if similar order exists in orderbook (bids sorted high to low)
+                    order_exists = False
+                    for idx, bid in enumerate(orderbook_bids):
+                        if bid.price < price:
+                            break
+                        
+                        if idx in used_bid_indices:
+                            continue
+                        
+                        # Check if bid has equal/greater size and same/better price
+                        if bid.amount >= size and bid.price >= price:
+                            order_exists = True
+                            used_bid_indices.add(idx)
+                            break
+                    
+                    if not order_exists:
                         buys.append(PriceSize(price, size))
-            if not sell_reference_price.is_nan():
-                for level in range(0, self._sell_levels):
-                    price = sell_reference_price * (Decimal("1") + self._ask_spread + (level * self._order_level_spread))
-                    price = market.c_quantize_order_price(self.trading_pair, price)
-                    size = self._order_amount + (self._order_level_amount * level)
-                    size = market.c_quantize_order_amount(self.trading_pair, size)
-                    if size > 0:
+        
+        # Create sell orders
+        if not sell_reference_price.is_nan():
+            for level in range(0, self._sell_levels):
+                price = sell_reference_price * (Decimal("1") + self._ask_spread + (level * self._order_level_spread))
+                price = market.c_quantize_order_price(self.trading_pair, price)
+                size = self._order_amount + (self._order_level_amount * level)
+                size = market.c_quantize_order_amount(self.trading_pair, size)
+                
+                if size > 0:
+                    # Check if similar order exists in orderbook (asks sorted low to high)
+                    order_exists = False
+                    for idx, ask in enumerate(orderbook_asks):
+                        if ask.price > price:
+                            break
+                        
+                        if idx in used_ask_indices:
+                            continue
+                        
+                        # Check if ask has equal/greater size and same/better price
+                        if ask.amount >= size and ask.price <= price:
+                            order_exists = True
+                            used_ask_indices.add(idx)
+                            break
+                    
+                    if not order_exists:
                         sells.append(PriceSize(price, size))
 
         return Proposal(buys, sells)
@@ -1196,107 +1220,55 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         """
         cdef:
             list active_orders = self.active_non_hanging_orders
+            list orders_to_cancel = []
 
-        if active_orders and any(order_age(o, self._current_timestamp) > self._max_order_age for o in active_orders):
+        if active_orders:
+            # Collect only orders that exceed max age
             for order in active_orders:
-                self.c_cancel_order(self._market_info, order.client_order_id)
+                if order_age(order, self._current_timestamp) > self._max_order_age:
+                    orders_to_cancel.append(order)
+            
+            # Cancel via batch
+            if len(orders_to_cancel) > 0:
+                # Track cancellations in strategy
+                for order in orders_to_cancel:
+                    self._sb_order_tracker.c_check_and_track_cancel(order.client_order_id)
+                
+                # Execute batch cancel
+                self._market_info.market.batch_order_cancel(orders_to_cancel=orders_to_cancel)
 
-    cdef c_process_orders_sequentially(self, object proposal):
+    cdef c_process_orders_proposal(self, object proposal):
         """
-        Processes orders sequentially: cancel one order then create one, ordered by price (lower first)
+        Processes orders: only create new ones (no cancellations).
         """
-        if self._cancel_timestamp > self._current_timestamp:
+        if self._create_timestamp > self._current_timestamp:
             return
 
         cdef:
             list active_orders = self.active_non_hanging_orders
-            list active_buy_prices = []
-            list active_sell_prices = []
-            bint to_defer_canceling = False
             double expiration_seconds = NaN
-            str bid_order_id, ask_order_id
             bint orders_created = False
 
-        if len(active_orders) == 0:
-            # No active orders, just create new ones
-            if self.c_to_create_orders(proposal):
-                self.c_execute_orders_proposal(proposal)
-            return
-
-        if proposal is not None and self._order_refresh_tolerance_pct >= 0:
-            active_buy_prices = [Decimal(str(o.price)) for o in active_orders if o.is_buy]
-            active_sell_prices = [Decimal(str(o.price)) for o in active_orders if not o.is_buy]
-            proposal_buys = [buy.price for buy in proposal.buys]
-            proposal_sells = [sell.price for sell in proposal.sells]
-
-            if self.c_is_within_tolerance(active_buy_prices, proposal_buys) and \
-                    self.c_is_within_tolerance(active_sell_prices, proposal_sells):
-                to_defer_canceling = True
-
-        if not to_defer_canceling:
-            self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-
-            # Sort active orders by price (lower price first)
-            active_buys = sorted([o for o in active_orders if o.is_buy], key=lambda x: x.price)
-            active_sells = sorted([o for o in active_orders if not o.is_buy], key=lambda x: x.price)
-
-            # Sort proposal orders by price (lower price first)
-            proposal_buys = sorted(proposal.buys, key=lambda x: x.price) if proposal.buys else []
-            proposal_sells = sorted(proposal.sells, key=lambda x: x.price) if proposal.sells else []
-
-            # Process buy orders: cancel then create
-            max_buys = max(len(active_buys), len(proposal_buys))
-            for idx in range(max_buys):
-                # Cancel existing buy order if it exists and is not hanging
-                if idx < len(active_buys):
-                    order = active_buys[idx]
-                    if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                        self.c_cancel_order(self._market_info, order.client_order_id)
-
-                # Create new buy order if it exists in proposal
-                if idx < len(proposal_buys):
-                    buy = proposal_buys[idx]
-                    if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
-                        self.logger().info(
-                            f"({self.trading_pair}) Creating bid order (level {idx}) "
-                            f"at (Size, Price): {buy.size.normalize()} {self.base_asset}, "
-                            f"{buy.price.normalize()} {self.quote_asset}"
-                        )
-                    bid_order_id = self.c_buy_with_specific_market(
-                        self._market_info,
-                        buy.size,
-                        order_type=self._limit_order_type,
-                        price=buy.price,
-                        expiration_seconds=expiration_seconds
-                    )
-                    orders_created = True
-
-            # Process sell orders: cancel then create
-            max_sells = max(len(active_sells), len(proposal_sells))
-            for idx in range(max_sells):
-                # Cancel existing sell order if it exists and is not hanging
-                if idx < len(active_sells):
-                    order = active_sells[idx]
-                    if not self._hanging_orders_tracker.is_potential_hanging_order(order):
-                        self.c_cancel_order(self._market_info, order.client_order_id)
-
-                # Create new sell order if it exists in proposal
-                if idx < len(proposal_sells):
-                    sell = proposal_sells[idx]
-                    if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
-                        self.logger().info(
-                            f"({self.trading_pair}) Creating ask order (level {idx}) "
-                            f"at (Size, Price): {sell.size.normalize()} {self.base_asset}, "
-                            f"{sell.price.normalize()} {self.quote_asset}"
-                        )
-                    ask_order_id = self.c_sell_with_specific_market(
-                        self._market_info,
-                        sell.size,
-                        order_type=self._limit_order_type,
-                        price=sell.price,
-                        expiration_seconds=expiration_seconds
-                    )
-                    orders_created = True
+        # Only create orders from proposal if there are any
+        if proposal is not None and (len(proposal.buys) > 0 or len(proposal.sells) > 0):
+            if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
+                self.logger().info(
+                    f"({self.trading_pair}) Creating {len(proposal.buys)} bid and {len(proposal.sells)} ask orders via BATCH"
+                )
+            
+            orders_to_create = self.c_create_orders_from_proposal(proposal.buys, proposal.sells, expiration_seconds)
+            created_orders = self._market_info.market.batch_order_create(orders_to_create=orders_to_create)
+            
+            # Track created orders
+            for created_order in created_orders:
+                self.c_start_tracking_limit_order(
+                    self._market_info,
+                    created_order.client_order_id,
+                    created_order.is_buy,
+                    created_order.price,
+                    created_order.quantity
+                )
+            orders_created = True
 
         if orders_created:
             self.set_timers()
@@ -1305,15 +1277,76 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         cdef:
             list active_orders = self.market_info_to_active_orders.get(self._market_info, [])
             object price = self.get_price()
+            list orders_to_cancel = []
+        
         active_orders = [order for order in active_orders
                          if order.client_order_id not in self.hanging_order_ids]
+        
+        # Collect orders below minimum spread
         for order in active_orders:
             negation = -1 if order.is_buy else 1
             if (negation * (order.price - price) / price) < self._minimum_spread:
                 self.logger().info(f"Order is below minimum spread ({self._minimum_spread})."
                                    f" Canceling Order: ({'Buy' if order.is_buy else 'Sell'}) "
                                    f"ID - {order.client_order_id}")
-                self.c_cancel_order(self._market_info, order.client_order_id)
+                orders_to_cancel.append(order)
+        
+        # Cancel via batch if there are orders to cancel
+        if len(orders_to_cancel) > 0:
+            # Track cancellations in strategy
+            for order in orders_to_cancel:
+                self._sb_order_tracker.c_check_and_track_cancel(order.client_order_id)
+            
+            # Execute batch cancel
+            self._market_info.market.batch_order_cancel(orders_to_cancel=orders_to_cancel)
+
+    cdef list c_create_orders_from_proposal(self, object proposal_buys, object proposal_sells, double expiration_seconds):
+        """
+        Helper method to create LimitOrder objects from proposal buys and sells.
+        Returns a list of LimitOrder objects ready for batch creation.
+        """
+        cdef:
+            ExchangeBase market = self._market_info.market
+            list orders_to_create = []
+            str client_order_id
+        
+        # Create buy orders
+        for buy in proposal_buys:
+            client_order_id = get_new_client_order_id(
+                is_buy=True,
+                trading_pair=self.trading_pair,
+                hbot_order_id_prefix=market.client_order_id_prefix,
+                max_id_len=market.client_order_id_max_length
+            )
+            orders_to_create.append(LimitOrder(
+                client_order_id=client_order_id,
+                trading_pair=self.trading_pair,
+                is_buy=True,
+                base_currency=self.base_asset,
+                quote_currency=self.quote_asset,
+                price=buy.price,
+                quantity=buy.size,
+            ))
+        
+        # Create sell orders
+        for sell in proposal_sells:
+            client_order_id = get_new_client_order_id(
+                is_buy=False,
+                trading_pair=self.trading_pair,
+                hbot_order_id_prefix=market.client_order_id_prefix,
+                max_id_len=market.client_order_id_max_length
+            )
+            orders_to_create.append(LimitOrder(
+                client_order_id=client_order_id,
+                trading_pair=self.trading_pair,
+                is_buy=False,
+                base_currency=self.base_asset,
+                quote_currency=self.quote_asset,
+                price=sell.price,
+                quantity=sell.size,
+            ))
+        
+        return orders_to_create
 
     cdef bint c_to_create_orders(self, object proposal):
         non_hanging_orders_non_cancelled = [o for o in self.active_non_hanging_orders if not
@@ -1327,56 +1360,43 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
     cdef c_execute_orders_proposal(self, object proposal):
         cdef:
             double expiration_seconds = NaN
-            str bid_order_id, ask_order_id
             bint orders_created = False
         # Number of pair of orders to track for hanging orders
         number_of_pairs = min((len(proposal.buys), len(proposal.sells))) if self._hanging_orders_enabled else 0
 
-        if len(proposal.buys) > 0:
+        # Use batch order creation
+        if len(proposal.buys) > 0 or len(proposal.sells) > 0:
             if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
-                price_quote_str = [f"{buy.size.normalize()} {self.base_asset}, "
-                                   f"{buy.price.normalize()} {self.quote_asset}"
-                                   for buy in proposal.buys]
                 self.logger().info(
-                    f"({self.trading_pair}) Creating {len(proposal.buys)} bid orders "
-                    f"at (Size, Price): {price_quote_str}"
+                    f"({self.trading_pair}) Creating {len(proposal.buys)} bid and {len(proposal.sells)} ask orders via BATCH"
                 )
-            for idx, buy in enumerate(proposal.buys):
-                bid_order_id = self.c_buy_with_specific_market(
+            
+            orders_to_create = self.c_create_orders_from_proposal(proposal.buys, proposal.sells, expiration_seconds)
+            created_orders = self._market_info.market.batch_order_create(orders_to_create=orders_to_create)
+            
+            # Track created orders and handle hanging orders
+            for idx, created_order in enumerate(created_orders):
+                self.c_start_tracking_limit_order(
                     self._market_info,
-                    buy.size,
-                    order_type=self._limit_order_type,
-                    price=buy.price,
-                    expiration_seconds=expiration_seconds
+                    created_order.client_order_id,
+                    created_order.is_buy,
+                    created_order.price,
+                    created_order.quantity
                 )
-                orders_created = True
-                if idx < number_of_pairs:
-                    order = next((o for o in self.active_orders if o.client_order_id == bid_order_id))
+                
+                # Handle hanging orders tracking
+                if self._hanging_orders_enabled and idx < number_of_pairs:
+                    order = next((o for o in self.active_orders if o.client_order_id == created_order.client_order_id), None)
                     if order:
-                        self._hanging_orders_tracker.add_current_pairs_of_proposal_orders_executed_by_strategy(
-                            CreatedPairOfOrders(order, None))
-        if len(proposal.sells) > 0:
-            if self._logging_options & self.OPTION_LOG_CREATE_ORDER:
-                price_quote_str = [f"{sell.size.normalize()} {self.base_asset}, "
-                                   f"{sell.price.normalize()} {self.quote_asset}"
-                                   for sell in proposal.sells]
-                self.logger().info(
-                    f"({self.trading_pair}) Creating {len(proposal.sells)} ask "
-                    f"orders at (Size, Price): {price_quote_str}"
-                )
-            for idx, sell in enumerate(proposal.sells):
-                ask_order_id = self.c_sell_with_specific_market(
-                    self._market_info,
-                    sell.size,
-                    order_type=self._limit_order_type,
-                    price=sell.price,
-                    expiration_seconds=expiration_seconds
-                )
-                orders_created = True
-                if idx < number_of_pairs:
-                    order = next((o for o in self.active_orders if o.client_order_id == ask_order_id))
-                    if order:
-                        self._hanging_orders_tracker.current_created_pairs_of_orders[idx].sell_order = order
+                        if created_order.is_buy:
+                            self._hanging_orders_tracker.add_current_pairs_of_proposal_orders_executed_by_strategy(
+                                CreatedPairOfOrders(order, None))
+                        else:
+                            if idx < len(self._hanging_orders_tracker.current_created_pairs_of_orders):
+                                self._hanging_orders_tracker.current_created_pairs_of_orders[idx].sell_order = order
+            
+            orders_created = True
+        
         if orders_created:
             self.set_timers()
 

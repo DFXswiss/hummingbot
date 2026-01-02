@@ -889,7 +889,11 @@ class MQTTLogHandler(logging.Handler):
             logger_name=record.name
 
         )
-        self.log_pub.publish(msg)
+        try:
+            self.log_pub.publish(msg)
+        except (AttributeError, Exception):
+            # Silently ignore MQTT publish failures - don't crash logging
+            pass
 
 
 class MQTTExternalEvents:
