@@ -30,16 +30,6 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ env.DOCKER_TAGS }}
-
       - name: Log in to Azure
         uses: azure/login@v2
         with:
@@ -80,14 +70,6 @@ jobs:
           LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Stop Azure Container Instance
-        run: |
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev
-
-      - name: Delete Azure Container Instance
-        run: |
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev --yes
 
       - name: Deploy container instance
         run: |
