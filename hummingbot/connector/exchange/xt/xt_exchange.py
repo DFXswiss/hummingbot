@@ -534,6 +534,75 @@ class XtExchange(ExchangePyBase):
             )
         return successful_cancellations + failed_cancellations
 
+    async def _cancel_lost_orders(self):
+        """
+        Override to use batch cancellation for lost orders instead of individual calls.
+        """
+        lost_orders = self._order_tracker.lost_orders.copy()
+        if not lost_orders:
+            return
+        
+        self.logger().info(f"[BATCH CANCEL LOST] Canceling {len(lost_orders)} lost orders via batch")
+        
+        # Separate orders with and without exchange IDs
+        orders_with_exchange_ids = []
+        
+        for order in lost_orders.values():
+            if order.exchange_order_id:
+                orders_with_exchange_ids.append(order)
+            else:
+                self.logger().debug(
+                    f"Lost order {order.client_order_id} does not have an exchange id. Skipping."
+                )
+        
+        if not orders_with_exchange_ids:
+            return
+        
+        # Process in chunks (max 20 per batch)
+        chunk_size = 20
+        for i in range(0, len(orders_with_exchange_ids), chunk_size):
+            chunk = orders_with_exchange_ids[i:i + chunk_size]
+            
+            try:
+                exchange_order_ids = [int(order.exchange_order_id) for order in chunk]
+                
+                self.logger().info(
+                    f"[BATCH CANCEL LOST] Sending batch cancel for {len(exchange_order_ids)} lost orders"
+                )
+                
+                cancel_result = await self._api_delete(
+                    path_url=CONSTANTS.BATCH_ORDER_PATH_URL,
+                    data={"orderIds": exchange_order_ids},
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.BATCH_ORDER_PATH_URL
+                )
+                
+                if cancel_result.get("rc") == 0:
+                    # Batch succeeded, update order states
+                    for order in chunk:
+                        order_update = OrderUpdate(
+                            client_order_id=order.client_order_id,
+                            exchange_order_id=order.exchange_order_id,
+                            trading_pair=order.trading_pair,
+                            update_timestamp=self.current_timestamp,
+                            new_state=OrderState.CANCELED,
+                        )
+                        self._order_tracker.process_order_update(order_update)
+                    
+                    self.logger().info(
+                        f"[BATCH CANCEL LOST] Successfully canceled {len(chunk)} lost orders"
+                    )
+                else:
+                    # Batch failed
+                    error_msg = f"Batch cancel failed. API response: {cancel_result}"
+                    self.logger().error(f"[BATCH CANCEL LOST ERROR] {error_msg}")
+            
+            except Exception as e:
+                self.logger().error(
+                    f"[BATCH CANCEL LOST ERROR] Exception canceling lost orders: {e}",
+                    exc_info=True
+                )
+
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
         """
         Example:

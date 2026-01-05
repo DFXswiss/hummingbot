@@ -45,7 +45,7 @@ send_error_logs: true
 
 # Advanced database options, currently supports SQLAlchemy's included dialects
 # Reference: https://docs.sqlalchemy.org/en/13/dialects/
-# To use an instance of SQLite DB the required configuration is
+# To use an instance of SQLite DB the required configuration is 
 #   db_engine: sqlite
 # To use a DBMS the required configuration is
 #   db_host: 127.0.0.1
@@ -63,38 +63,38 @@ db_mode:
 #     BTC: 0.1
 #     USDT: 1000
 balance_asset_limit:
-  bybit: {}
-  hyperliquid: {}
-  vertex_testnet: {}
-  bing_x: {}
-  gate_io: {}
-  okx: {}
-  btc_markets: {}
-  kucoin_hft: {}
-  bybit_testnet: {}
-  xrpl: {}
+  coinbase_advanced_trade: {}
   kraken: {}
+  injective_v2: {}
+  xrpl: {}
+  xt: {}
   htx: {}
-  binance: {}
-  vertex: {}
-  bitmart: {}
-  hyperliquid_testnet: {}
-  dexalot_testnet: {}
+  binance_us: {}
+  mexc: {}
   ndax: {}
   ascend_ex: {}
-  binance_us: {}
-  dexalot: {}
-  xt: {}
+  vertex_testnet: {}
+  hyperliquid: {}
+  bybit_testnet: {}
   derive: {}
+  binance: {}
+  okx: {}
+  vertex: {}
+  dexalot_testnet: {}
+  gate_io: {}
+  kucoin: {}
+  bitmart: {}
+  dexalot: {}
+  hyperliquid_testnet: {}
+  bing_x: {}
+  ndax_testnet: {}
   derive_testnet: {}
   bitstamp: {}
-  bitrue: {}
-  mexc: {}
-  coinbase_advanced_trade: {}
   cube: {}
-  injective_v2: {}
-  kucoin: {}
-  ndax_testnet: {}
+  bitrue: {}
+  bybit: {}
+  btc_markets: {}
+  kucoin_hft: {}
 
 # Fixed gas price (in Gwei) for Ethereum transactions
 manual_gas_price: 50.0
@@ -125,7 +125,7 @@ global_token:
   global_token_symbol: $
 
 # Percentage of API rate limits (on any exchange and any end point) allocated to this bot instance.
-# Enter 50 to indicate 50%. E.g. if the API rate limit is 100 calls per second, and you allocate
+# Enter 50 to indicate 50%. E.g. if the API rate limit is 100 calls per second, and you allocate 
 # 50% to this setting, the bot will have a maximum (limit) of 50 calls per second
 rate_limits_share_pct: 100.0
 
@@ -170,9 +170,9 @@ color:
   bronze_label: '#CD7F32'
 
 # The tick size is the frequency with which the clock notifies the time iterators by calling the
-# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy
+# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy 
 # will run every second.
-tick_size: 1.0
+tick_size: 20.0
 
 market_data_collection:
   market_data_collection_enabled: false
