@@ -1,7 +1,7 @@
 import asyncio
 import decimal
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from async_timeout import timeout
 from bidict import bidict
@@ -11,11 +11,11 @@ from hummingbot.connector.exchange.xt import xt_constants as CONSTANTS, xt_utils
 from hummingbot.connector.exchange.xt.xt_api_order_book_data_source import XtAPIOrderBookDataSource
 from hummingbot.connector.exchange.xt.xt_api_user_stream_data_source import XtAPIUserStreamDataSource
 from hummingbot.connector.exchange.xt.xt_auth import XtAuth
-from hummingbot.connector.exchange.xt.xt_batch_order_status import BatchOrderStatusRequest
-from hummingbot.connector.exchange.xt.xt_batch_order_handler import BatchOrderHandler
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
-from hummingbot.connector.utils import combine_to_hb_trading_pair
+from hummingbot.connector.utils import combine_to_hb_trading_pair, get_new_client_order_id
+from hummingbot.core.data_type.limit_order import LimitOrder
+from hummingbot.core.data_type.market_order import MarketOrder
 from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
@@ -55,15 +55,12 @@ class XtExchange(ExchangePyBase):
         self._trading_pairs = trading_pairs
         super().__init__(client_config_map)
         
-        # Initialize batch order status request handler for debouncing
-        self._batch_order_status_handler = BatchOrderStatusRequest(self)
-        
-        # Initialize batch order handler for place/cancel orders
-        self._batch_order_handler = BatchOrderHandler(self)
-        
         # Initialize timer for periodic tracked orders logging
         self._last_tracked_orders_log_time = 0
         self._tracked_orders_log_interval = 300  # 5 minutes in seconds
+        
+        # Track latest polled time for fills (similar to Injective V2)
+        self._latest_polled_order_fill_time = 0
 
     @staticmethod
     def xt_order_type(order_type: OrderType) -> str:
@@ -130,6 +127,224 @@ class XtExchange(ExchangePyBase):
     def supported_order_types(self):
         return [OrderType.LIMIT, OrderType.MARKET]
 
+    def supports_batch_order_create(self) -> bool:
+        """
+        Indicates that XT exchange supports native batch order creation.
+        """
+        return True
+
+    def batch_order_create(self, orders_to_create: List[Union[MarketOrder, LimitOrder]]) -> List[Union[MarketOrder, LimitOrder]]:
+        """
+        Issues a batch order creation as a single API request.
+        :param orders_to_create: A list of LimitOrder or MarketOrder objects representing the orders to create.
+        :returns: A list of LimitOrder or MarketOrder objects representing the created orders with generated order IDs.
+        """
+        orders_with_ids_to_create = []
+        for order in orders_to_create:
+            client_order_id = get_new_client_order_id(
+                is_buy=order.is_buy,
+                trading_pair=order.trading_pair,
+                hbot_order_id_prefix=self.client_order_id_prefix,
+                max_id_len=self.client_order_id_max_length,
+            )
+            orders_with_ids_to_create.append(order.copy_with_id(client_order_id=client_order_id))
+        
+        # Schedule async batch creation
+        from hummingbot.core.utils.async_utils import safe_ensure_future
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=orders_with_ids_to_create))
+        return orders_with_ids_to_create
+
+    def batch_order_cancel(self, orders_to_cancel: List[LimitOrder]):
+        """
+        Issues a batch order cancellation as a single API request.
+        :param orders_to_cancel: A list of the orders to cancel.
+        """
+        from hummingbot.core.utils.async_utils import safe_ensure_future
+        safe_ensure_future(coro=self._execute_batch_cancel(orders_to_cancel=orders_to_cancel))
+
+    async def _execute_batch_order_create(self, orders_to_create: List[Union[MarketOrder, LimitOrder]]):
+        """
+        Executes batch order creation using XT's batch endpoint directly.
+        Automatically chunks orders into groups of maximum 20.
+        """
+        if not orders_to_create:
+            return
+        
+        # Split into chunks of 20 (XT API limit)
+        chunk_size = 20
+        order_chunks = [orders_to_create[i:i + chunk_size] for i in range(0, len(orders_to_create), chunk_size)]
+        
+        self.logger().info(
+            f"[BATCH ORDER CREATE] Creating {len(orders_to_create)} orders in {len(order_chunks)} batch(es)"
+        )
+        
+        for chunk_idx, chunk in enumerate(order_chunks):
+            try:
+                self.logger().info(
+                    f"[BATCH ORDER CREATE] Processing batch {chunk_idx + 1}/{len(order_chunks)} with {len(chunk)} orders"
+                )
+                
+                # Prepare batch items
+                items = []
+                for order in chunk:
+                    order_type = OrderType.LIMIT if isinstance(order, LimitOrder) else OrderType.MARKET
+                    price = order.price if order_type == OrderType.LIMIT else Decimal("0")
+                    size = order.quantity if order_type == OrderType.LIMIT else order.amount
+                    trade_type = TradeType.BUY if order.is_buy else TradeType.SELL
+                    
+                    amount_str = f"{size:f}"
+                    price_str = f"{price:f}"
+                    type_str = self.xt_order_type(order_type)
+                    side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
+                    symbol = await self.exchange_symbol_associated_to_pair(trading_pair=order.trading_pair)
+                    
+                    api_params = {
+                        "symbol": symbol,
+                        "side": side_str,
+                        "quantity": amount_str,
+                        "type": type_str,
+                        "clientOrderId": order.client_order_id,
+                        "bizType": "SPOT",
+                    }
+                    
+                    if order_type == OrderType.LIMIT:
+                        api_params["price"] = price_str
+                        api_params["timeInForce"] = CONSTANTS.TIME_IN_FORCE_GTC
+                    
+                    items.append(api_params)
+                    
+                    # Start tracking the order
+                    self.start_tracking_order(
+                        order_id=order.client_order_id,
+                        exchange_order_id=None,
+                        trading_pair=order.trading_pair,
+                        order_type=order_type,
+                        trade_type=trade_type,
+                        price=price,
+                        amount=size,
+                    )
+                
+                # Make single batch API call for this chunk
+                self.logger().info(f"[BATCH ORDER CREATE] API call for {len(items)} orders")
+                result = await self._api_post(
+                    path_url=CONSTANTS.BATCH_ORDER_PATH_URL,
+                    data={"items": items},
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.BATCH_ORDER_PATH_URL
+                )
+                
+                # Process results
+                transact_time = self.current_timestamp
+                if "result" in result and result["result"] is not None:
+                    batch_response = result["result"]
+                    results_list = batch_response.get("items", []) if isinstance(batch_response, dict) else batch_response
+                    
+                    # Create mapping by clientOrderId
+                    result_map = {r["clientOrderId"]: r for r in results_list if r and "clientOrderId" in r}
+                    
+                    # Update order tracking
+                    for order in chunk:
+                        client_order_id = order.client_order_id
+                        if client_order_id in result_map:
+                            order_result = result_map[client_order_id]
+                            if "orderId" in order_result:
+                                exchange_order_id = str(order_result["orderId"])
+                                order_update = OrderUpdate(
+                                    client_order_id=client_order_id,
+                                    exchange_order_id=exchange_order_id,
+                                    trading_pair=order.trading_pair,
+                                    update_timestamp=transact_time,
+                                    new_state=OrderState.OPEN,
+                                )
+                                self._order_tracker.process_order_update(order_update)
+                            else:
+                                self.logger().error(f"Order {client_order_id} missing orderId in batch response")
+                                self._update_order_after_failure(client_order_id, order.trading_pair)
+                        else:
+                            self.logger().error(f"Order {client_order_id} not found in batch response")
+                            self._update_order_after_failure(client_order_id, order.trading_pair)
+                else:
+                    self.logger().error(f"Batch order create failed. API response: {result}")
+                    for order in chunk:
+                        self._update_order_after_failure(order.client_order_id, order.trading_pair)
+            
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                self.logger().error(f"Batch order create exception: {ex}", exc_info=True)
+                for order in chunk:
+                    self._update_order_after_failure(order.client_order_id, order.trading_pair)
+
+    def _update_order_after_failure(self, order_id: str, trading_pair: str):
+        """Helper to mark order as failed"""
+        order_update = OrderUpdate(
+            client_order_id=order_id,
+            trading_pair=trading_pair,
+            update_timestamp=self.current_timestamp,
+            new_state=OrderState.FAILED,
+        )
+        self._order_tracker.process_order_update(order_update)
+
+    async def _execute_batch_cancel(self, orders_to_cancel: List[LimitOrder]):
+        """
+        Executes batch order cancellation using XT's batch endpoint directly.
+        Automatically chunks orders into groups of maximum 20.
+        """
+        if not orders_to_cancel:
+            return
+        
+        # Get exchange order IDs
+        orders_with_exchange_ids = []
+        for order in orders_to_cancel:
+            tracked_order = self._order_tracker.all_updatable_orders.get(order.client_order_id)
+            if tracked_order is not None and tracked_order.exchange_order_id:
+                orders_with_exchange_ids.append((order, tracked_order.exchange_order_id))
+        
+        if not orders_with_exchange_ids:
+            return
+        
+        # Split into chunks of 20 (XT API limit)
+        chunk_size = 20
+        order_chunks = [orders_with_exchange_ids[i:i + chunk_size] for i in range(0, len(orders_with_exchange_ids), chunk_size)]
+        
+        self.logger().info(
+            f"[BATCH ORDER CANCEL] Canceling {len(orders_with_exchange_ids)} orders in {len(order_chunks)} batch(es)"
+        )
+        
+        for chunk_idx, chunk in enumerate(order_chunks):
+            try:
+                order_ids = [int(ex_id) for _, ex_id in chunk]
+                
+                self.logger().info(
+                    f"[BATCH ORDER CANCEL] Processing batch {chunk_idx + 1}/{len(order_chunks)} with {len(order_ids)} orders"
+                )
+                
+                result = await self._api_delete(
+                    path_url=CONSTANTS.BATCH_ORDER_PATH_URL,
+                    data={"orderIds": order_ids},
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.BATCH_ORDER_PATH_URL
+                )
+                
+                # Check if successful
+                if result.get("rc") == 0:
+                    self.logger().info(f"[BATCH ORDER CANCEL] Success for batch {chunk_idx + 1}")
+                    for order, _ in chunk:
+                        order_update = OrderUpdate(
+                            client_order_id=order.client_order_id,
+                            trading_pair=order.trading_pair,
+                            update_timestamp=self.current_timestamp,
+                            new_state=OrderState.CANCELED,
+                        )
+                        self._order_tracker.process_order_update(order_update)
+                else:
+                    self.logger().error(f"Batch cancel failed for batch {chunk_idx + 1}. API response: {result}")
+            
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                self.logger().error(f"Batch order cancel exception for batch {chunk_idx + 1}: {ex}", exc_info=True)
+
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception):
         error_description = str(request_exception)
         is_time_synchronizer_related = ("AUTH_002" in error_description or "AUTH_003" in error_description
@@ -184,25 +399,66 @@ class XtExchange(ExchangePyBase):
                            order_type: OrderType,
                            price: Decimal,
                            **kwargs) -> Tuple[str, float]:
-        # Use batch handler for debounced/batched order placement
-        return await self._batch_order_handler.place_order(
-            order_id=order_id,
-            trading_pair=trading_pair,
-            amount=amount,
-            trade_type=trade_type,
-            order_type=order_type,
-            price=price,
-            **kwargs
+        amount_str = f"{amount:f}"
+        type_str = self.xt_order_type(order_type)
+        side_str = CONSTANTS.SIDE_BUY if trade_type is TradeType.BUY else CONSTANTS.SIDE_SELL
+        symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
+        
+        self.logger().info(
+            f"[SINGLE ORDER CREATE] Placing {side_str} {type_str} order: "
+            f"client_order_id={order_id}, trading_pair={trading_pair}, amount={amount_str}, price={price}"
         )
+        
+        api_params = {
+            "symbol": symbol,
+            "side": side_str,
+            "quantity": amount_str,
+            "type": type_str,
+            "clientOrderId": order_id,
+            "bizType": "SPOT",
+        }
+        if order_type == OrderType.LIMIT:
+            price_str = f"{price:f}"
+            api_params["price"] = price_str
+            api_params["timeInForce"] = CONSTANTS.TIME_IN_FORCE_GTC
+        
+        order_result = await self._api_post(
+            path_url=CONSTANTS.CREATE_ORDER_PATH_URL,
+            data=api_params,
+            is_auth_required=True,
+            limit_id=CONSTANTS.CREATE_ORDER_PATH_URL
+        )
+        
+        if order_result.get("rc") != 0:
+            raise IOError(f"Error submitting order. API response: {order_result}")
+        
+        result = order_result["result"]
+        exchange_order_id = str(result["orderId"])
+        self.logger().info(f"[SINGLE ORDER CREATE] Success: exchange_order_id={exchange_order_id}")
+        return exchange_order_id, self.current_timestamp
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
         self._log_tracked_orders_if_needed()
         ex_order_id = await tracked_order.get_exchange_order_id()
-        # Use batch handler for debounced/batched order cancellation
-        await self._batch_order_handler.cancel_order(
-            order_id=order_id,
-            exchange_order_id=ex_order_id
+        
+        self.logger().info(
+            f"[SINGLE ORDER CANCEL] Canceling order: "
+            f"client_order_id={order_id}, exchange_order_id={ex_order_id}"
         )
+        
+        cancel_result = await self._api_delete(
+            path_url=CONSTANTS.ORDER_PATH_URL,
+            params={
+                "orderId": int(ex_order_id)
+            },
+            is_auth_required=True,
+            limit_id=CONSTANTS.ORDER_PATH_URL
+        )
+        
+        if cancel_result.get("rc") != 0:
+            raise IOError(f"Error canceling order {order_id}. API response: {cancel_result}")
+        
+        self.logger().info(f"[SINGLE ORDER CANCEL] Success: client_order_id={order_id}")
 
 
     async def _execute_order_cancel(self, order: InFlightOrder) -> str:
@@ -223,29 +479,53 @@ class XtExchange(ExchangePyBase):
 
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
         """
-        Cancels all currently active orders. The cancellations are performed in parallel tasks.
+        Cancels all currently active orders using batch cancellation.
+        Chunking is handled automatically by _execute_batch_cancel.
         :param timeout_seconds: the maximum time (in seconds) the cancel logic should run
         :return: a list of CancellationResult instances, one for each of the orders to be cancelled
         """
         incomplete_orders = [o for o in self.in_flight_orders.values() if not o.is_done]
-        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id) for o in incomplete_orders]
         order_id_set = set([o.client_order_id for o in incomplete_orders])
         successful_cancellations = []
         failed_cancellations = []
 
+        if len(incomplete_orders) == 0:
+            return []
+
         try:
             async with timeout(timeout_seconds):
-                await safe_gather(*tasks, return_exceptions=True)
-
+                self.logger().info(f"[CANCEL ALL] Canceling {len(incomplete_orders)} orders via batch")
+                
+                # Convert to LimitOrder objects for batch_order_cancel
+                orders_to_cancel = []
+                for order in incomplete_orders:
+                    limit_order = LimitOrder(
+                        client_order_id=order.client_order_id,
+                        trading_pair=order.trading_pair,
+                        is_buy=order.trade_type == TradeType.BUY,
+                        base_currency=order.trading_pair.split("-")[0],
+                        quote_currency=order.trading_pair.split("-")[1],
+                        price=order.price,
+                        quantity=order.amount
+                    )
+                    orders_to_cancel.append(limit_order)
+                
+                # Call batch cancel (chunking handled automatically inside)
+                self.batch_order_cancel(orders_to_cancel=orders_to_cancel)
+                
                 # Give time for the cancelled statuses to be processed
                 # KILL_TIMEOUT is 10 seconds default in hummingbot_application
-                await self._sleep(1.0)
+                await self._sleep(2.0)
 
                 open_orders = await self._get_open_orders()
                 failed_cancellations = set([o for o in open_orders if o in order_id_set])
                 successful_cancellations = order_id_set - failed_cancellations
                 successful_cancellations = [CancellationResult(client_order_id, True) for client_order_id in successful_cancellations]
                 failed_cancellations = [CancellationResult(client_order_id, False) for client_order_id in failed_cancellations]
+                
+                self.logger().info(
+                    f"[CANCEL ALL] Complete: {len(successful_cancellations)} successful, {len(failed_cancellations)} failed"
+                )
         except Exception:
             self.logger().network(
                 "Unexpected error cancelling orders.",
@@ -253,6 +533,75 @@ class XtExchange(ExchangePyBase):
                 app_warning_msg="Failed to cancel order. Check API key and network connection."
             )
         return successful_cancellations + failed_cancellations
+
+    async def _cancel_lost_orders(self):
+        """
+        Override to use batch cancellation for lost orders instead of individual calls.
+        """
+        lost_orders = self._order_tracker.lost_orders.copy()
+        if not lost_orders:
+            return
+        
+        self.logger().info(f"[BATCH CANCEL LOST] Canceling {len(lost_orders)} lost orders via batch")
+        
+        # Separate orders with and without exchange IDs
+        orders_with_exchange_ids = []
+        
+        for order in lost_orders.values():
+            if order.exchange_order_id:
+                orders_with_exchange_ids.append(order)
+            else:
+                self.logger().debug(
+                    f"Lost order {order.client_order_id} does not have an exchange id. Skipping."
+                )
+        
+        if not orders_with_exchange_ids:
+            return
+        
+        # Process in chunks (max 20 per batch)
+        chunk_size = 20
+        for i in range(0, len(orders_with_exchange_ids), chunk_size):
+            chunk = orders_with_exchange_ids[i:i + chunk_size]
+            
+            try:
+                exchange_order_ids = [int(order.exchange_order_id) for order in chunk]
+                
+                self.logger().info(
+                    f"[BATCH CANCEL LOST] Sending batch cancel for {len(exchange_order_ids)} lost orders"
+                )
+                
+                cancel_result = await self._api_delete(
+                    path_url=CONSTANTS.BATCH_ORDER_PATH_URL,
+                    data={"orderIds": exchange_order_ids},
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.BATCH_ORDER_PATH_URL
+                )
+                
+                if cancel_result.get("rc") == 0:
+                    # Batch succeeded, update order states
+                    for order in chunk:
+                        order_update = OrderUpdate(
+                            client_order_id=order.client_order_id,
+                            exchange_order_id=order.exchange_order_id,
+                            trading_pair=order.trading_pair,
+                            update_timestamp=self.current_timestamp,
+                            new_state=OrderState.CANCELED,
+                        )
+                        self._order_tracker.process_order_update(order_update)
+                    
+                    self.logger().info(
+                        f"[BATCH CANCEL LOST] Successfully canceled {len(chunk)} lost orders"
+                    )
+                else:
+                    # Batch failed
+                    error_msg = f"Batch cancel failed. API response: {cancel_result}"
+                    self.logger().error(f"[BATCH CANCEL LOST ERROR] {error_msg}")
+            
+            except Exception as e:
+                self.logger().error(
+                    f"[BATCH CANCEL LOST ERROR] Exception canceling lost orders: {e}",
+                    exc_info=True
+                )
 
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
         """
@@ -494,52 +843,132 @@ class XtExchange(ExchangePyBase):
                     )
                     await self._order_tracker.process_order_not_found(order.client_order_id)
         
+    async def _update_orders_fills(self, orders: List[InFlightOrder]):
+        """
+        Batch fetch fills for all orders by trading pair and timestamp (Injective V2 style).
+        """
+        if not orders:
+            return
+        
+        # Find oldest order creation time
+        oldest_order_creation_time = self.current_timestamp
+        for order in orders:
+            oldest_order_creation_time = min(oldest_order_creation_time, order.creation_timestamp)
+        
+        # Group orders by trading pair
+        orders_by_trading_pair = {}
+        for order in orders:
+            if order.trading_pair not in orders_by_trading_pair:
+                orders_by_trading_pair[order.trading_pair] = []
+            orders_by_trading_pair[order.trading_pair].append(order)
+        
+        # Determine start time for fetching trades
+        start_time = min(oldest_order_creation_time, self._latest_polled_order_fill_time)
+        start_time_ms = int(start_time * 1000)
+        
+        self.logger().info(
+            f"[BATCH FILLS UPDATE] Fetching fills for {len(orders)} orders across "
+            f"{len(orders_by_trading_pair)} trading pair(s), start_time={start_time}"
+        )
+        
+        # Fetch trades for each trading pair
+        for trading_pair, pair_orders in orders_by_trading_pair.items():
+            try:
+                # Create a set of client order IDs we care about
+                target_order_ids = {order.client_order_id for order in pair_orders}
+                
+                symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
+                
+                self.logger().info(
+                    f"[BATCH FILLS UPDATE] Fetching trades for {trading_pair} ({symbol}) "
+                    f"with {len(pair_orders)} orders, startTime={start_time_ms}"
+                )
+                
+                # Fetch ALL trades for this trading pair since start_time
+                response = await self._api_get(
+                    path_url=CONSTANTS.MY_TRADES_PATH_URL,
+                    params={
+                        "symbol": symbol,
+                        "startTime": start_time_ms,
+                    },
+                    is_auth_required=True,
+                    limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
+                )
+                
+                if "result" not in response or response["result"] is None:
+                    self.logger().debug(f"No trade results for {trading_pair}")
+                    continue
+                
+                all_fills_response = response["result"]
+                trades = all_fills_response.get("items", [])
+                
+                self.logger().info(
+                    f"[BATCH FILLS UPDATE] Received {len(trades)} total trades for {trading_pair}"
+                )
+                
+                # Process trades that belong to our tracked orders
+                processed_count = 0
+                for trade in trades:
+                    # Find the order this trade belongs to
+                    client_order_id = trade.get("clientOrderId")
+                    
+                    # Only process trades for the orders we're tracking
+                    if client_order_id not in target_order_ids:
+                        continue
+                    
+                    # Find the order object
+                    order = next((o for o in pair_orders if o.client_order_id == client_order_id), None)
+                    if order is None:
+                        continue
+                    
+                    exchange_order_id = str(trade["orderId"])
+                    fee = TradeFeeBase.new_spot_fee(
+                        fee_schema=self.trade_fee_schema(),
+                        trade_type=order.trade_type,
+                        percent_token=trade["feeCurrency"],
+                        flat_fees=[TokenAmount(amount=Decimal(trade["fee"]), token=trade["feeCurrency"])]
+                    )
+                    
+                    fill_timestamp = trade["time"] * 1e-3
+                    trade_update = TradeUpdate(
+                        trade_id=str(trade["tradeId"]),
+                        client_order_id=client_order_id,
+                        exchange_order_id=exchange_order_id,
+                        trading_pair=trading_pair,
+                        fee=fee,
+                        fill_base_amount=Decimal(trade["quantity"]),
+                        fill_quote_amount=Decimal(trade["quoteQty"]),
+                        fill_price=Decimal(trade["price"]),
+                        fill_timestamp=fill_timestamp,
+                    )
+                    
+                    self._order_tracker.process_trade_update(trade_update)
+                    
+                    # Update latest polled time
+                    self._latest_polled_order_fill_time = max(
+                        self._latest_polled_order_fill_time,
+                        fill_timestamp
+                    )
+                    processed_count += 1
+                
+                self.logger().info(
+                    f"[BATCH FILLS UPDATE] Processed {processed_count} fills for tracked orders in {trading_pair}"
+                )
+                
+            except asyncio.CancelledError:
+                raise
+            except Exception as request_error:
+                self.logger().warning(
+                    f"Failed to fetch trade updates for {trading_pair}. Error: {request_error}",
+                    exc_info=request_error,
+                )
+
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
-        trade_updates = []
-
-        # Do not fetch trades for cached orders(canceled orders). We are using XT Rest API to process trade fills
-        # and custom XT order cancel handling(in order status update and user stream listner loop) will take care of cancelled order fills.
-        if order.client_order_id not in self._order_tracker.cached_orders:
-            exchange_order_id = await order.get_exchange_order_id()
-            trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=order.trading_pair)
-            self.logger().info(f"[REST TRADES] _all_trade_updates_for_order called - client_order_id: {order.client_order_id}, exchange_order_id: {exchange_order_id}, symbol: {trading_pair}")
-            response = await self._api_get(
-                path_url=CONSTANTS.MY_TRADES_PATH_URL,
-                params={
-                    "symbol": trading_pair,
-                    "orderId": int(exchange_order_id)
-                },
-                is_auth_required=True,
-                limit_id=CONSTANTS.GLOBAL_RATE_LIMIT)
-
-            # order update might've already come through user stream listner
-            # and order might no longer be available on the exchange.
-            if "result" not in response or response["result"] is None:
-                return trade_updates
-
-            all_fills_response = response["result"]
-            for trade in all_fills_response["items"]:
-                exchange_order_id = str(trade["orderId"])
-                fee = TradeFeeBase.new_spot_fee(
-                    fee_schema=self.trade_fee_schema(),
-                    trade_type=order.trade_type,
-                    percent_token=trade["feeCurrency"],
-                    flat_fees=[TokenAmount(amount=Decimal(trade["fee"]), token=trade["feeCurrency"])]
-                )
-                trade_update = TradeUpdate(
-                    trade_id=str(trade["tradeId"]),
-                    client_order_id=order.client_order_id,
-                    exchange_order_id=exchange_order_id,
-                    trading_pair=trading_pair,
-                    fee=fee,
-                    fill_base_amount=Decimal(trade["quantity"]),
-                    fill_quote_amount=Decimal(trade["quoteQty"]),
-                    fill_price=Decimal(trade["price"]),
-                    fill_timestamp=trade["time"] * 1e-3,
-                )
-                trade_updates.append(trade_update)
-
-        return trade_updates
+        """
+        DEPRECATED: This method is no longer used since we override _update_orders_fills.
+        Kept for compatibility but returns empty list.
+        """
+        return []
 
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
         #return await self._batch_order_status_handler.request_order_status(tracked_order)

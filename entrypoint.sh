@@ -31,6 +31,14 @@ then
       cp -r $sourceDir $targetDir
     fi
   done
+
+  # Copy conf_client.yml if it exists
+  confClientSource=/home/hummingbot/bots/$botDir/conf/conf_client.yml
+  if [[ -f $confClientSource ]]
+  then
+    echo "$(date): Copy ${confClientSource} to /home/hummingbot/conf/conf_client.yml" >> $myLogFile
+    cp $confClientSource /home/hummingbot/conf/conf_client.yml
+  fi
 else
   echo "$(date): No 'BOT_DIR' environment variable set" >> $myLogFile
 fi

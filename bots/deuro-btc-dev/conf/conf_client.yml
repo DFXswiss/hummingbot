@@ -33,11 +33,11 @@ mqtt_bridge:
   mqtt_password: ''
   mqtt_namespace: hbot
   mqtt_ssl: false
-  mqtt_logger: true
-  mqtt_notifier: true
-  mqtt_commands: true
-  mqtt_events: true
-  mqtt_external_events: true
+  mqtt_logger: false
+  mqtt_notifier: false
+  mqtt_commands: false
+  mqtt_events: false
+  mqtt_external_events: false
   mqtt_autostart: false
 
 # Error log sharing
@@ -63,38 +63,38 @@ db_mode:
 #     BTC: 0.1
 #     USDT: 1000
 balance_asset_limit:
-  bybit: {}
-  hyperliquid: {}
-  vertex_testnet: {}
-  bing_x: {}
-  gate_io: {}
-  okx: {}
-  btc_markets: {}
-  kucoin_hft: {}
-  bybit_testnet: {}
-  xrpl: {}
+  coinbase_advanced_trade: {}
   kraken: {}
+  injective_v2: {}
+  xrpl: {}
+  xt: {}
   htx: {}
-  binance: {}
-  vertex: {}
-  bitmart: {}
-  hyperliquid_testnet: {}
-  dexalot_testnet: {}
+  binance_us: {}
+  mexc: {}
   ndax: {}
   ascend_ex: {}
-  binance_us: {}
-  dexalot: {}
-  xt: {}
+  vertex_testnet: {}
+  hyperliquid: {}
+  bybit_testnet: {}
   derive: {}
+  binance: {}
+  okx: {}
+  vertex: {}
+  dexalot_testnet: {}
+  gate_io: {}
+  kucoin: {}
+  bitmart: {}
+  dexalot: {}
+  hyperliquid_testnet: {}
+  bing_x: {}
+  ndax_testnet: {}
   derive_testnet: {}
   bitstamp: {}
-  bitrue: {}
-  mexc: {}
-  coinbase_advanced_trade: {}
   cube: {}
-  injective_v2: {}
-  kucoin: {}
-  ndax_testnet: {}
+  bitrue: {}
+  bybit: {}
+  btc_markets: {}
+  kucoin_hft: {}
 
 # Fixed gas price (in Gwei) for Ethereum transactions
 manual_gas_price: 50.0
@@ -170,9 +170,9 @@ color:
   bronze_label: '#CD7F32'
 
 # The tick size is the frequency with which the clock notifies the time iterators by calling the
-# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy
+# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy 
 # will run every second.
-tick_size: 1.0
+tick_size: 20.0
 
 market_data_collection:
   market_data_collection_enabled: false
