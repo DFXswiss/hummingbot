@@ -777,7 +777,7 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
 
             # self.c_cancel_active_orders_on_max_age_limit()
             self.c_process_orders_proposal(proposal)
-            self.c_cancel_orders_below_min_spread()
+            self.c_cancel_orders_outside_spread_range()
         finally:
             self._last_timestamp = timestamp
 
@@ -1273,32 +1273,52 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         if orders_created:
             self.set_timers()
 
-    cdef c_cancel_orders_below_min_spread(self):
+    cdef c_cancel_orders_outside_spread_range(self):
         cdef:
-            list active_orders = self.market_info_to_active_orders.get(self._market_info, [])
+            list active_orders = self._market_info.market.limit_orders
             object price = self.get_price()
             list orders_to_cancel = []
+            object max_buy_spread
+            object max_sell_spread
+        
+        total_active = len(active_orders)
+        hanging_count = len([o for o in active_orders if o.client_order_id in self.hanging_order_ids])
         
         active_orders = [order for order in active_orders
                          if order.client_order_id not in self.hanging_order_ids]
         
-        # Collect orders below minimum spread
+        # Calculate max spread based on order levels
+        max_buy_spread = self._bid_spread + (self._order_levels - 1) * self._order_level_spread
+        max_sell_spread = self._ask_spread + (self._order_levels - 1) * self._order_level_spread
+        
+        # Collect orders outside the spread range (too close or too far)
         for order in active_orders:
-            negation = -1 if order.is_buy else 1
-            if (negation * (order.price - price) / price) < self._minimum_spread:
-                self.logger().info(f"Order is below minimum spread ({self._minimum_spread})."
-                                   f" Canceling Order: ({'Buy' if order.is_buy else 'Sell'}) "
-                                   f"ID - {order.client_order_id}")
-                orders_to_cancel.append(order)
+            if order.is_buy:
+                # Buy order: cancel if too close (within bid_spread) or too far (beyond max_buy_spread)
+                spread = (price - order.price) / price
+                if spread < self._bid_spread or spread > max_buy_spread:
+                    orders_to_cancel.append(order)
+            else:
+                # Sell order: cancel if too close (within ask_spread) or too far (beyond max_sell_spread)
+                spread = (order.price - price) / price
+                if spread < self._ask_spread or spread > max_sell_spread:
+                    orders_to_cancel.append(order)
         
         # Cancel via batch if there are orders to cancel
         if len(orders_to_cancel) > 0:
+            order_ids = [f"{order.client_order_id} ({'Buy' if order.is_buy else 'Sell'} @ {order.price})" 
+                         for order in orders_to_cancel]
+            self.logger().info(f"Canceling {len(orders_to_cancel)} orders below minimum spread ({self._minimum_spread}): {', '.join(order_ids)}")
+            
             # Track cancellations in strategy
             for order in orders_to_cancel:
                 self._sb_order_tracker.c_check_and_track_cancel(order.client_order_id)
             
             # Execute batch cancel
             self._market_info.market.batch_order_cancel(orders_to_cancel=orders_to_cancel)
+        else:
+            if len(active_orders) > 0:
+                self.logger().info(f"No orders to cancel below minimum spread (checked {len(active_orders)} active orders)")
 
     cdef list c_create_orders_from_proposal(self, object proposal_buys, object proposal_sells, double expiration_seconds):
         """
