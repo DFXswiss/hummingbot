@@ -33,15 +33,15 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # - name: Set up Docker Buildx
-      #   uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      # - name: Build and push Docker image
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
-      #     push: true
-      #     tags: ${{ env.DOCKER_TAGS }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.DOCKER_TAGS }}
 
       - name: Log in to Azure
         uses: azure/login@v2
@@ -126,19 +126,19 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
-      # - name: Stop Azure Container Instance
-      #   run: |
-      #     az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev
-      #     az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev
-      #     az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev
-      #     az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev
+      - name: Stop Azure Container Instance
+        run: |
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev
 
-      # - name: Delete Azure Container Instance
-      #   run: |
-      #     az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev --yes
-      #     az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev --yes
-      #     az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev --yes
-      #     az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev --yes
+      - name: Delete Azure Container Instance
+        run: |
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-dev --yes
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-dev --yes
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-dev --yes
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-dev --yes
 
       - name: Deploy container instance
         run: |
