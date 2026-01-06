@@ -63,38 +63,38 @@ db_mode:
 #     BTC: 0.1
 #     USDT: 1000
 balance_asset_limit:
-  ndax: {}
-  xt: {}
-  bitstamp: {}
-  dexalot: {}
-  bybit: {}
-  binance_us: {}
-  bing_x: {}
-  xrpl: {}
-  bitmart: {}
-  cube: {}
-  kucoin: {}
-  derive_testnet: {}
-  dexalot_testnet: {}
-  kucoin_hft: {}
-  hyperliquid_testnet: {}
-  okx: {}
-  vertex: {}
   coinbase_advanced_trade: {}
-  binance: {}
-  gate_io: {}
-  mexc: {}
-  ndax_testnet: {}
-  htx: {}
-  vertex_testnet: {}
-  bybit_testnet: {}
-  derive: {}
   kraken: {}
   injective_v2: {}
-  bitrue: {}
+  xrpl: {}
+  xt: {}
+  htx: {}
+  binance_us: {}
+  mexc: {}
+  ndax: {}
   ascend_ex: {}
-  btc_markets: {}
+  vertex_testnet: {}
   hyperliquid: {}
+  bybit_testnet: {}
+  derive: {}
+  binance: {}
+  okx: {}
+  vertex: {}
+  dexalot_testnet: {}
+  gate_io: {}
+  kucoin: {}
+  bitmart: {}
+  dexalot: {}
+  hyperliquid_testnet: {}
+  bing_x: {}
+  ndax_testnet: {}
+  derive_testnet: {}
+  bitstamp: {}
+  cube: {}
+  bitrue: {}
+  bybit: {}
+  btc_markets: {}
+  kucoin_hft: {}
 
 # Fixed gas price (in Gwei) for Ethereum transactions
 manual_gas_price: 50.0
@@ -170,9 +170,9 @@ color:
   bronze_label: '#CD7F32'
 
 # The tick size is the frequency with which the clock notifies the time iterators by calling the
-# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy
+# c_tick() method, that means for example that if the tick size is 1, the logic of the strategy 
 # will run every second.
-tick_size: 1.0
+tick_size: 20.0
 
 market_data_collection:
   market_data_collection_enabled: false
