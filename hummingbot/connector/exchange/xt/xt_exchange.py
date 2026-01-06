@@ -352,10 +352,46 @@ class XtExchange(ExchangePyBase):
         return is_time_synchronizer_related
 
     def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
-        pass
+        """
+        Determines if the error from status update indicates the order doesn't exist on the exchange.
+        
+        Context: This is called per-order (not batch) in base class _update_orders_with_error_handler loop.
+        
+        For XT exchange, we specifically check for:
+        - TimeoutError: from get_exchange_order_id() at line 1016 - order never received exchange_order_id
+        - ValueError with "ORDER_005": XT API explicitly says order not found
+        - ValueError with "invalid literal for int() with base 10: 'None'": exchange_order_id is string "None"
+        
+        These errors definitively indicate THIS specific order doesn't exist on the exchange.
+        """
+        error_message = str(status_update_exception)
+        return (
+            isinstance(status_update_exception, TimeoutError) or
+            (isinstance(status_update_exception, ValueError) and 
+             ("ORDER_005" in error_message or 
+              "invalid literal for int() with base 10: 'None'" in error_message))
+        )
 
     def _is_order_not_found_during_cancelation_error(self, cancelation_exception: Exception) -> bool:
-        pass
+        """
+        Determines if the error from cancellation indicates the order doesn't exist on the exchange.
+        
+        Context: This is called per-order (not batch) in base class _execute_order_cancel.
+        
+        For XT exchange, same specific error checks as status update:
+        - TimeoutError: order never received exchange_order_id
+        - ValueError with "ORDER_005": XT API explicitly says order not found
+        - ValueError with "invalid literal for int() with base 10: 'None'": exchange_order_id is string "None"
+        
+        These mean the order cannot be cancelled on the exchange and should be removed from tracking.
+        """
+        error_message = str(cancelation_exception)
+        return (
+            isinstance(cancelation_exception, TimeoutError) or
+            (isinstance(cancelation_exception, ValueError) and 
+             ("ORDER_005" in error_message or 
+              "invalid literal for int() with base 10: 'None'" in error_message))
+        )
 
     def _create_web_assistants_factory(self) -> WebAssistantsFactory:
         return web_utils.build_api_factory(
@@ -546,14 +582,21 @@ class XtExchange(ExchangePyBase):
         
         # Separate orders with and without exchange IDs
         orders_with_exchange_ids = []
+        orders_without_exchange_ids = []
         
         for order in lost_orders.values():
-            if order.exchange_order_id:
+            # Check for both None and string "None" (legacy data from str(None) bug)
+            if order.exchange_order_id and order.exchange_order_id != "None":
                 orders_with_exchange_ids.append(order)
             else:
-                self.logger().debug(
-                    f"Lost order {order.client_order_id} does not have an exchange id. Skipping."
-                )
+                orders_without_exchange_ids.append(order)
+        
+        for order in orders_without_exchange_ids:
+            self.logger().warning(
+                f"Lost order {order.client_order_id} does not have an exchange_order_id. "
+                f"Cannot cancel on exchange. Removing from lost orders."
+            )
+            await self._order_tracker.process_order_not_found(order.client_order_id)
         
         if not orders_with_exchange_ids:
             return
@@ -971,7 +1014,7 @@ class XtExchange(ExchangePyBase):
         return []
 
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
-        #return await self._batch_order_status_handler.request_order_status(tracked_order)
+        #return await self._batch_order_status_handler.request_order_status(tracked_order) ## TODO: REMOVE ENTIRELY, THE BASE CLASS SUPPORTING THIS SHOULD BE REMOVED TOO.
         client_order_id = tracked_order.client_order_id
         exchange_order_id = await tracked_order.get_exchange_order_id()
         self.logger().info(f"[REST ORDER STATUS] _request_order_status called - client_order_id: {client_order_id}, exchange_order_id: {exchange_order_id}")
@@ -983,10 +1026,26 @@ class XtExchange(ExchangePyBase):
             is_auth_required=True,
             limit_id=CONSTANTS.ORDER_PATH_URL)
 
+        # Check if XT explicitly says order not found
+        if response.get("mc") == "ORDER_005":
+            # ORDER_005 = order not found, definitively doesn't exist on exchange
+            raise ValueError(f"Order {client_order_id} not found on exchange (XT error code: ORDER_005)")
+        
         # order update might've already come through user stream listner
         # and order might no longer be available on the exchange.
         if "result" not in response or response["result"] is None:
-            return
+            # Return OrderUpdate with current state preserved (like Cube exchange)
+            # Don't assume what happened - maybe filled via user stream, maybe API issue
+            self.logger().debug(
+                f"Order {client_order_id} not in API response. Preserving current state. Response: {response}"
+            )
+            return OrderUpdate(
+                client_order_id=client_order_id,
+                exchange_order_id=exchange_order_id,
+                trading_pair=tracked_order.trading_pair,
+                update_timestamp=self.current_timestamp,
+                new_state=tracked_order.current_state,
+            )
 
         updated_order_data = response["result"]
         new_state = CONSTANTS.ORDER_STATE[updated_order_data["state"]]
