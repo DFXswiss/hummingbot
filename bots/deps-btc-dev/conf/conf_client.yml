@@ -172,7 +172,7 @@ color:
 # The tick size is the frequency with which the clock notifies the time iterators by calling the
 # c_tick() method, that means for example that if the tick size is 1, the logic of the strategy 
 # will run every second.
-tick_size: 20.0
+tick_size: 6.0
 
 market_data_collection:
   market_data_collection_enabled: false

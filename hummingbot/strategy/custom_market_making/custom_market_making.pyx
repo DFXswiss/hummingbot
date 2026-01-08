@@ -1280,6 +1280,9 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
             list orders_to_cancel = []
             object max_buy_spread
             object max_sell_spread
+            ExchangeBase market = self._market_info.market
+            object remaining_qty
+            object expected_qty
         
         total_active = len(active_orders)
         hanging_count = len([o for o in active_orders if o.client_order_id in self.hanging_order_ids])
@@ -1291,24 +1294,32 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         max_buy_spread = self._bid_spread + (self._order_levels - 1) * self._order_level_spread
         max_sell_spread = self._ask_spread + (self._order_levels - 1) * self._order_level_spread
         
-        # Collect orders outside the spread range (too close or too far)
+        # Collect orders outside the spread range or with invalid quantities
         for order in active_orders:
+            # Check spread range
             if order.is_buy:
-                # Buy order: cancel if too close (within bid_spread) or too far (beyond max_buy_spread)
                 spread = (price - order.price) / price
                 if spread < self._bid_spread or spread > max_buy_spread:
                     orders_to_cancel.append(order)
+                    continue
             else:
-                # Sell order: cancel if too close (within ask_spread) or too far (beyond max_sell_spread)
                 spread = (order.price - price) / price
                 if spread < self._ask_spread or spread > max_sell_spread:
                     orders_to_cancel.append(order)
+                    continue
+            
+            # Check if quantity matches configured order_amount
+            remaining_qty = order.quantity - order.filled_quantity
+            expected_qty = market.c_quantize_order_amount(self.trading_pair, self._order_amount)
+            
+            if abs(remaining_qty - expected_qty) > expected_qty * Decimal("0.0001"):
+                orders_to_cancel.append(order)
         
         # Cancel via batch if there are orders to cancel
         if len(orders_to_cancel) > 0:
-            order_ids = [f"{order.client_order_id} ({'Buy' if order.is_buy else 'Sell'} @ {order.price})" 
+            order_ids = [f"{order.client_order_id} ({'Buy' if order.is_buy else 'Sell'} @ {order.price}, qty: {order.quantity - order.filled_quantity})" 
                          for order in orders_to_cancel]
-            self.logger().info(f"Canceling {len(orders_to_cancel)} orders below minimum spread ({self._minimum_spread}): {', '.join(order_ids)}")
+            self.logger().info(f"Canceling {len(orders_to_cancel)} orders (invalid spread or quantity): {', '.join(order_ids)}")
             
             # Track cancellations in strategy
             for order in orders_to_cancel:
@@ -1318,7 +1329,7 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
             self._market_info.market.batch_order_cancel(orders_to_cancel=orders_to_cancel)
         else:
             if len(active_orders) > 0:
-                self.logger().info(f"No orders to cancel below minimum spread (checked {len(active_orders)} active orders)")
+                self.logger().info(f"All orders valid (checked {len(active_orders)} active orders)")
 
     cdef list c_create_orders_from_proposal(self, object proposal_buys, object proposal_sells, double expiration_seconds):
         """
