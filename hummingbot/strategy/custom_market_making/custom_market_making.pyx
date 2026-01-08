@@ -10,6 +10,7 @@ from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.connector.exchange_base cimport ExchangeBase
 from hummingbot.core.clock cimport Clock
 from hummingbot.core.data_type.common import OrderType, PriceType, TradeType
+from hummingbot.core.data_type.in_flight_order import OrderState
 from hummingbot.core.data_type.limit_order cimport LimitOrder
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.network_iterator import NetworkStatus
@@ -1275,14 +1276,12 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
 
     cdef c_cancel_orders_outside_spread_range(self):
         cdef:
+            dict in_flight_orders = self._market_info.market.in_flight_orders
             list active_orders = self._market_info.market.limit_orders
             object price = self.get_price()
             list orders_to_cancel = []
             object max_buy_spread
             object max_sell_spread
-            ExchangeBase market = self._market_info.market
-            object remaining_qty
-            object expected_qty
         
         total_active = len(active_orders)
         hanging_count = len([o for o in active_orders if o.client_order_id in self.hanging_order_ids])
@@ -1294,32 +1293,31 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         max_buy_spread = self._bid_spread + (self._order_levels - 1) * self._order_level_spread
         max_sell_spread = self._ask_spread + (self._order_levels - 1) * self._order_level_spread
         
-        # Collect orders outside the spread range or with invalid quantities
+        # Collect orders outside the spread range or partially filled
         for order in active_orders:
+            # Get InFlightOrder to check actual fill status
+            in_flight_order = in_flight_orders.get(order.client_order_id)
+            
+            # Cancel if partially filled (check OrderState)
+            if in_flight_order and in_flight_order.current_state == OrderState.PARTIALLY_FILLED:
+                orders_to_cancel.append(order)
+                continue
+            
             # Check spread range
             if order.is_buy:
                 spread = (price - order.price) / price
                 if spread < self._bid_spread or spread > max_buy_spread:
                     orders_to_cancel.append(order)
-                    continue
             else:
                 spread = (order.price - price) / price
                 if spread < self._ask_spread or spread > max_sell_spread:
                     orders_to_cancel.append(order)
-                    continue
-            
-            # Check if quantity matches configured order_amount
-            remaining_qty = order.quantity - order.filled_quantity
-            expected_qty = market.c_quantize_order_amount(self.trading_pair, self._order_amount)
-            
-            if abs(remaining_qty - expected_qty) > expected_qty * Decimal("0.0001"):
-                orders_to_cancel.append(order)
         
         # Cancel via batch if there are orders to cancel
         if len(orders_to_cancel) > 0:
-            order_ids = [f"{order.client_order_id} ({'Buy' if order.is_buy else 'Sell'} @ {order.price}, qty: {order.quantity - order.filled_quantity})" 
+            order_ids = [f"{order.client_order_id} ({'Buy' if order.is_buy else 'Sell'} @ {order.price})" 
                          for order in orders_to_cancel]
-            self.logger().info(f"Canceling {len(orders_to_cancel)} orders (invalid spread or quantity): {', '.join(order_ids)}")
+            self.logger().info(f"Canceling {len(orders_to_cancel)} orders (partially filled or invalid spread): {', '.join(order_ids)}")
             
             # Track cancellations in strategy
             for order in orders_to_cancel:
