@@ -38,7 +38,7 @@ max_order_age: 86400.0
 order_refresh_tolerance_pct: 0.21
 
 # Size of your bid and ask order.
-order_amount: 200
+order_amount: 2500
 
 # Price band ceiling.
 price_ceiling: -1.0
