@@ -7,9 +7,7 @@ on:
 
 env:
   CRYPTO_PAIR_01: deuro-usdt
-  CRYPTO_PAIR_02: deuro-btc
-  CRYPTO_PAIR_03: deps-usdt
-  CRYPTO_PAIR_04: deps-btc
+  CRYPTO_PAIR_02: deps-usdt
   DOCKER_TAGS: dfxswiss/hummingbot:latest
   AZURE_RESOURCE_GROUP: rg-dfx-api-prd
   AZURE_STORAGE_ACCOUNT_NAME: stdfxapiprd
@@ -98,54 +96,20 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Render deployment YAML for CRYPTO_PAIR_03
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-prd.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_03 }}-prd.yaml
-        env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_03 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Render deployment YAML for CRYPTO_PAIR_04
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-prd.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_04 }}-prd.yaml
-        env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_04 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
       - name: Stop Azure Container Instance
         run: |
           az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-prd
           az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-prd
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-prd
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-prd
 
       - name: Delete Azure Container Instance
         run: |
           az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-prd --yes
           az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-prd --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_03 }}-prd --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_04 }}-prd --yes
 
       - name: Deploy container instance
         run: |
           az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-prd.yaml
           az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-prd.yaml
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_03 }}-prd.yaml
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_04 }}-prd.yaml
 
       - name: Logout from Azure
         run: |
