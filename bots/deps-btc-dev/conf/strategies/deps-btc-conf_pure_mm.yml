@@ -15,13 +15,13 @@ market: DEPS-BTC
 # Spread of 1 = 1% away from mid price at that time.
 # Example if mid price is 100 and bid_spread is 1.
 # Your bid is placed at 99.
-bid_spread: 0.2
+bid_spread: 0.4
 
 # How far away from mid price to place the ask order.
 # Spread of 1 = 1% away from mid price at that time.
 # Example if mid price is 100 and ask_spread is 1.
 # Your bid is placed at 101.
-ask_spread: 0.2
+ask_spread: 0.4
 
 # DEPRECATED DO NOT USE
 minimum_spread: 0.1
