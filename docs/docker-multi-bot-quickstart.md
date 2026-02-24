@@ -39,11 +39,7 @@ Create per-bot folders (first time only):
 ```bash
 mkdir -p bots/deuro-usdt/{conf,logs,data,certs}
 
-mkdir -p bots/deuro-btc/{conf,logs,data,certs}
-
 mkdir -p bots/deps-usdt/{conf,logs,data,certs}
-
-mkdir -p bots/deps-btc/{conf,logs,data,certs}
 ```
 
 Start each bot with a unique project name (-p) and BOT_DIR:
@@ -55,17 +51,8 @@ docker-compose -f docker-compose.prod.yml -p deuro-usdt up -d
 
 # Bot 2
 IMAGE_NAME=local/hummingbot IMAGE_TAG=v1 \
-BOT_DIR="$(pwd)/bots/deuro-btc" \
-docker-compose -f docker-compose.prod.yml -p deuro-btc up -d
-
-IMAGE_NAME=local/hummingbot IMAGE_TAG=v1 \
 BOT_DIR="$(pwd)/bots/deps-usdt" \
 docker-compose -f docker-compose.prod.yml -p deps-usdt up -d
-
-# Bot 2
-IMAGE_NAME=local/hummingbot IMAGE_TAG=v1 \
-BOT_DIR="$(pwd)/bots/deps-btc" \
-docker-compose -f docker-compose.prod.yml -p deps-btc up -d
 ```
 
 Logs / stop per bot:
