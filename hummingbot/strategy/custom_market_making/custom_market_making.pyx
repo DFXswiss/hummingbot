@@ -805,6 +805,8 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
         orderbook_asks = list(self._market_info.order_book_ask_entries())
         used_bid_indices = set()
         used_ask_indices = set()
+        proposed_buy_prices = set()
+        proposed_sell_prices = set()
         
         # Create buy orders
         if not buy_reference_price.is_nan():
@@ -815,6 +817,9 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                 size = market.c_quantize_order_amount(self.trading_pair, size)
                 
                 if size > 0:
+                    if price in proposed_buy_prices:
+                        continue
+                    
                     # Check if similar order exists in orderbook (bids sorted high to low)
                     order_exists = False
                     for idx, bid in enumerate(orderbook_bids):
@@ -831,6 +836,7 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                             break
                     
                     if not order_exists:
+                        proposed_buy_prices.add(price)
                         buys.append(PriceSize(price, size))
         
         # Create sell orders
@@ -842,6 +848,9 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                 size = market.c_quantize_order_amount(self.trading_pair, size)
                 
                 if size > 0:
+                    if price in proposed_sell_prices:
+                        continue
+                    
                     # Check if similar order exists in orderbook (asks sorted low to high)
                     order_exists = False
                     for idx, ask in enumerate(orderbook_asks):
@@ -858,6 +867,7 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                             break
                     
                     if not order_exists:
+                        proposed_sell_prices.add(price)
                         sells.append(PriceSize(price, size))
 
         return Proposal(buys, sells)
