@@ -82,7 +82,7 @@ order_levels: 60
 order_level_amount: 0
 
 # Order price space between orders (if order_levels > 1).
-order_level_spread: 0.035
+order_level_spread: 0.049
 
 # How long to wait before placing the next order in case your order gets filled.
 filled_order_delay: 1
