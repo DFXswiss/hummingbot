@@ -787,8 +787,18 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
             ExchangeBase market = self._market_info.market
             list buys = []
             list sells = []
+            set existing_buy_prices = set()
+            set existing_sell_prices = set()
+            object active_order
 
         buy_reference_price = sell_reference_price = self.get_price()
+
+        # Track own active prices to avoid placing duplicate levels at the same quantized price.
+        for active_order in self.active_orders:
+            if active_order.is_buy:
+                existing_buy_prices.add(active_order.price)
+            else:
+                existing_sell_prices.add(active_order.price)
 
         if self._inventory_cost_price_delegate is not None:
             inventory_cost_price = self._inventory_cost_price_delegate.get_price()
@@ -818,6 +828,8 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                 
                 if size > 0:
                     if price in proposed_buy_prices:
+                        continue
+                    if price in existing_buy_prices:
                         continue
                     
                     # Check if similar order exists in orderbook (bids sorted high to low)
@@ -849,6 +861,8 @@ cdef class CustomMarketMakingStrategy(StrategyBase):
                 
                 if size > 0:
                     if price in proposed_sell_prices:
+                        continue
+                    if price in existing_sell_prices:
                         continue
                     
                     # Check if similar order exists in orderbook (asks sorted low to high)
