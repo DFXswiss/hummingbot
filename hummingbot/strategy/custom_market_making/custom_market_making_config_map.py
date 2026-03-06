@@ -34,7 +34,7 @@ def order_amount_prompt() -> str:
 
 
 def validate_price_source(value: str) -> Optional[str]:
-    if value not in {"current_market", "external_market", "custom_api"}:
+    if value not in {"current_market", "external_market", "custom_api", "fixed_price"}:
         return "Invalid price source type."
 
 
@@ -45,7 +45,9 @@ def on_validate_price_source(value: str):
         custom_market_making_config_map["take_if_crossed"].value = None
     if value != "custom_api":
         custom_market_making_config_map["price_source_custom_api"].value = None
-    else:
+    if value != "fixed_price":
+        custom_market_making_config_map["price_source_fixed_price"].value = None
+    if value == "custom_api":
         custom_market_making_config_map["price_type"].value = "custom"
 
 
@@ -82,7 +84,7 @@ def validate_price_floor_ceiling(value: str) -> Optional[str]:
 def validate_price_type(value: str) -> Optional[str]:
     error = None
     price_source = custom_market_making_config_map.get("price_source").value
-    if price_source != "custom_api":
+    if price_source not in {"custom_api", "fixed_price"}:
         valid_values = {"mid_price",
                         "last_price",
                         "last_own_trade_price",
@@ -92,7 +94,7 @@ def validate_price_type(value: str) -> Optional[str]:
                         }
         if value not in valid_values:
             error = "Invalid price type."
-    elif value != "custom":
+    elif value not in {None, "", "custom"}:
         error = "Invalid price type."
     return error
 
@@ -333,7 +335,7 @@ custom_market_making_config_map = {
                   validator=validate_bool),
     "price_source":
         ConfigVar(key="price_source",
-                  prompt="Which price source to use? (current_market/external_market/custom_api) >>> ",
+                  prompt="Which price source to use? (current_market/external_market/custom_api/fixed_price) >>> ",
                   type_str="str",
                   default="current_market",
                   validator=validate_price_source,
@@ -343,7 +345,7 @@ custom_market_making_config_map = {
                   prompt="Which price type to use? ("
                          "mid_price/last_price/last_own_trade_price/best_bid/best_ask/inventory_cost) >>> ",
                   type_str="str",
-                  required_if=lambda: custom_market_making_config_map.get("price_source").value != "custom_api",
+                  required_if=lambda: custom_market_making_config_map.get("price_source").value not in {"custom_api", "fixed_price"},
                   default="mid_price",
                   on_validated=on_validated_price_type,
                   validator=validate_price_type),
@@ -372,6 +374,12 @@ custom_market_making_config_map = {
                   prompt="Enter pricing API URL >>> ",
                   required_if=lambda: custom_market_making_config_map.get("price_source").value == "custom_api",
                   type_str="str"),
+    "price_source_fixed_price":
+        ConfigVar(key="price_source_fixed_price",
+                  prompt="Enter fixed price >>> ",
+                  required_if=lambda: custom_market_making_config_map.get("price_source").value == "fixed_price",
+                  type_str="decimal",
+                  validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=False)),
     "custom_api_update_interval":
         ConfigVar(key="custom_api_update_interval",
                   prompt="Enter custom API update interval in second (default: 5.0, min: 0.5) >>> ",

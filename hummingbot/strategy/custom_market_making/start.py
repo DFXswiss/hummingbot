@@ -8,6 +8,7 @@ from hummingbot.strategy.custom_market_making import CustomMarketMakingStrategy,
 from hummingbot.strategy.custom_market_making.custom_market_making_config_map import (
     custom_market_making_config_map as c_map,
 )
+from hummingbot.strategy.fixed_asset_price_delegate import FixedAssetPriceDelegate
 from hummingbot.strategy.custom_market_making.moving_price_band import MovingPriceBand
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.strategy.order_book_asset_price_delegate import OrderBookAssetPriceDelegate
@@ -52,6 +53,7 @@ def start(self):
         price_source_exchange = c_map.get("price_source_exchange").value
         price_source_market = c_map.get("price_source_market").value
         price_source_custom_api = c_map.get("price_source_custom_api").value
+        price_source_fixed_price = c_map.get("price_source_fixed_price").value
         custom_api_update_interval = c_map.get("custom_api_update_interval").value
         order_refresh_tolerance_pct = c_map.get("order_refresh_tolerance_pct").value / Decimal('100')
         order_override = c_map.get("order_override").value
@@ -96,6 +98,8 @@ def start(self):
         elif price_source == "custom_api":
             asset_price_delegate = APIAssetPriceDelegate(self.markets[exchange], price_source_custom_api,
                                                          custom_api_update_interval)
+        elif price_source == "fixed_price":
+            asset_price_delegate = FixedAssetPriceDelegate(self.markets[exchange], price_source_fixed_price)
         inventory_cost_price_delegate = None
         if price_type == "inventory_cost":
             db = self.trade_fill_db
