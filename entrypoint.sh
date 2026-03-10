@@ -45,7 +45,7 @@ fi
 
 # Start Hummingbot with the strategy
 strategyFile=`printenv STRATEGY_FILE`
-scriptFile=`printenv SCRIPT_FILE`
+scriptFile=`printenv SCRIPT_FILE` || true
 
 if [[ ! -z $strategyFile ]]
 then
