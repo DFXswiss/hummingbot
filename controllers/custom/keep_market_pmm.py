@@ -196,8 +196,8 @@ class KeepMarketPMM(ControllerBase):
             execution_strategy=ExecutionStrategy.LIMIT,
             controller_id=self.config.id,
         )
-        actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=buy_config))
         actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=sell_config))
+        actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=buy_config))
 
         return actions
 
