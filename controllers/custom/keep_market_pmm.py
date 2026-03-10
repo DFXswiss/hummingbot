@@ -1,9 +1,11 @@
+import random
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 
+import aiohttp
 from pydantic import Field
 
-from hummingbot.core.data_type.common import PriceType, TradeType
+from hummingbot.core.data_type.common import TradeType
 from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
 from hummingbot.strategy_v2.controllers.controller_base import ControllerBase, ControllerConfigBase
 from hummingbot.strategy_v2.executors.data_types import ConnectorPair
@@ -18,6 +20,10 @@ class KeepMarketPMMConfig(ControllerConfigBase):
     order_amount_quote: Decimal = Field(default=Decimal("100"), description="Quote amount per order")
     update_interval: float = Field(default=8.0, description="Update interval in seconds")
     candles_config: List[CandlesConfig] = []
+    price_source: str = Field(default="current_market", description="Price source: current_market | custom_api | fixed_price")
+    price_source_custom_api: Optional[str] = Field(default=None, description="URL for custom API price source")
+    custom_api_quote_key: str = Field(default="usd", description="JSON key to extract price from custom API response")
+    price_source_fixed_price: Optional[Decimal] = Field(default=None, description="Fixed reference price")
 
     def update_markets(self, markets):
         return markets.add_or_update(self.trading_connector, self.trading_pair)
@@ -41,48 +47,40 @@ class KeepMarketPMM(ControllerBase):
 
         self.processed_data = {
             "last_bid": None,
-            "last_ask": None,
             "last_candle": None,
         }
-
-        self.is_buy_cycle = True
 
         self.market_data_provider.initialize_rate_sources([ConnectorPair(
             connector_name=config.trading_connector,
             trading_pair=config.trading_pair
         )])
 
+    async def fetch_reference_price(self) -> Optional[Decimal]:
+        if self.config.price_source == "fixed_price":
+            return self.config.price_source_fixed_price
+        if self.config.price_source == "custom_api":
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(self.config.price_source_custom_api) as resp:
+                        data = await resp.json()
+                        return Decimal(str(data[self.config.custom_api_quote_key]))
+            except Exception as e:
+                self.logger().error(f"Error fetching custom API price: {e}")
+                return None
+        return None
+
     async def update_processed_data(self):
         try:
-            bid = self.market_data_provider.get_price_by_type(
-                self.config.trading_connector,
-                self.config.trading_pair,
-                PriceType.BestBid
-            )
-            ask = self.market_data_provider.get_price_by_type(
-                self.config.trading_connector,
-                self.config.trading_pair,
-                PriceType.BestAsk
-            )
+            reference_price = await self.fetch_reference_price()
+            if reference_price is None:
+                self.logger().warning("Price source unavailable, skipping cycle")
+            self.processed_data["last_bid"] = reference_price
 
             await self.fetch_candle_data()
 
-            if bid is not None and bid != 0:
-                self.processed_data["last_bid"] = Decimal(str(bid))
-            else:
-                self.logger().warning(f"Invalid bid price: {bid}")
-                self.processed_data["last_bid"] = None
-
-            if ask is not None and ask != 0:
-                self.processed_data["last_ask"] = Decimal(str(ask))
-            else:
-                self.logger().warning(f"Invalid ask price: {ask}")
-                self.processed_data["last_ask"] = None
-
         except Exception as e:
-            self.logger().error(f"Error getting bid/ask prices: {e}")
+            self.logger().error(f"Error updating processed data: {e}")
             self.processed_data["last_bid"] = None
-            self.processed_data["last_ask"] = None
 
     async def fetch_candle_data(self):
         try:
@@ -124,15 +122,10 @@ class KeepMarketPMM(ControllerBase):
 
             self.logger().info(f"----> {self.config.trading_pair} tick")
 
-            # Filter only order executors for the time check
-            order_executors = [e for e in self.executors_info if e.type == "order_executor"]
+            active_order_executors = [e for e in self.executors_info if e.type == "order_executor" and e.is_active]
 
-            if len(order_executors) > 0:
-                latest_executor = max(order_executors, key=lambda x: x.timestamp)
-                time_since_last_trade = current_time - latest_executor.timestamp
-
-                if time_since_last_trade < 50.0:
-                    return actions
+            if len(active_order_executors) > 0:
+                return actions
 
             last_candle = self.processed_data.get("last_candle")
             self.logger().info(f"----> {self.config.trading_pair} In range time to send order")
@@ -173,56 +166,44 @@ class KeepMarketPMM(ControllerBase):
         return actions
 
     def get_order_actions(self):
-        bid = self.processed_data.get("last_bid")
-        ask = self.processed_data.get("last_ask")
+        price = self.processed_data.get("last_bid")
 
-        if bid is None or ask is None:
+        if price is None or price <= 0:
             return []
 
-        if bid <= 0 or ask <= 0:
-            return []
-
+        fraction = Decimal(str(random.uniform(0.75, 1.0)))
+        amount = (self.config.order_amount_quote * fraction) / price
+        timestamp = self.market_data_provider.time()
         actions: List[ExecutorAction] = []
 
-        if self.is_buy_cycle:
-            buy_amount = self.config.order_amount_quote / ask
-
-            buy_config = OrderExecutorConfig(
-                timestamp=self.market_data_provider.time(),
-                connector_name=self.config.trading_connector,
-                trading_pair=self.config.trading_pair,
-                side=TradeType.BUY,
-                amount=buy_amount,
-                price=ask,
-                execution_strategy=ExecutionStrategy.LIMIT,
-                controller_id=self.config.id,
-            )
-            actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=buy_config))
-        else:
-            sell_amount = self.config.order_amount_quote / bid
-
-            sell_config = OrderExecutorConfig(
-                timestamp=self.market_data_provider.time(),
-                connector_name=self.config.trading_connector,
-                trading_pair=self.config.trading_pair,
-                side=TradeType.SELL,
-                amount=sell_amount,
-                price=bid,
-                execution_strategy=ExecutionStrategy.LIMIT,
-                controller_id=self.config.id,
-            )
-            actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=sell_config))
-
-        # Randomly select next cycle (buy or sell)
-        self.is_buy_cycle = not self.is_buy_cycle
+        buy_config = OrderExecutorConfig(
+            timestamp=timestamp,
+            connector_name=self.config.trading_connector,
+            trading_pair=self.config.trading_pair,
+            side=TradeType.BUY,
+            amount=amount,
+            price=price,
+            execution_strategy=ExecutionStrategy.LIMIT,
+            controller_id=self.config.id,
+        )
+        sell_config = OrderExecutorConfig(
+            timestamp=timestamp,
+            connector_name=self.config.trading_connector,
+            trading_pair=self.config.trading_pair,
+            side=TradeType.SELL,
+            amount=amount,
+            price=price,
+            execution_strategy=ExecutionStrategy.LIMIT,
+            controller_id=self.config.id,
+        )
+        actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=buy_config))
+        actions.append(CreateExecutorAction(controller_id=self.config.id, executor_config=sell_config))
 
         return actions
 
     def to_format_status(self):
-        bid = self.processed_data.get("last_bid")
-        ask = self.processed_data.get("last_ask")
-        next_order_type = "BUY" if self.is_buy_cycle else "SELL"
-        return [f"KeepMarketPMM bid={bid} ask={ask} q={self.config.order_amount_quote} next={next_order_type}"]
+        price = self.processed_data.get("last_bid")
+        return [f"KeepMarketPMM price={price} q={self.config.order_amount_quote}"]
 
     async def control_task(self):
         connector_ready = any(connector.ready for connector in self.market_data_provider.connectors.values())
