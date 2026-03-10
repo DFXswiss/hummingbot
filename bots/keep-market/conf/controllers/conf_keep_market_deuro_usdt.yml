@@ -5,7 +5,10 @@ total_amount_quote: '10'
 manual_kill_switch: false
 candles_config: []
 initial_positions: []
-update_interval: 5.0
+update_interval: 15.0
 trading_connector: xt
 trading_pair: DEURO-USDT
 order_amount_quote: '10'
+price_source: custom_api
+price_source_custom_api: https://api.deuro.com/prices/eur
+custom_api_quote_key: usd

@@ -1,0 +1,41 @@
+apiVersion: 2023-05-01
+location: westeurope
+name: "ci-dfx-hb-keep-market-dev"
+type: Microsoft.ContainerInstance/containerGroups
+properties:
+  osType: Linux
+  containers:
+    - name: "hb-keep-market"
+      properties:
+        image: dfxswiss/hummingbot:beta
+        resources:
+          requests:
+            cpu: 0.5
+            memoryInGb: 1.0
+        environmentVariables:
+          - name: BOT_DIR
+            value: "keep-market-dev"
+          - name: SCRIPT_FILE
+            value: "v2_with_controllers.py"
+          - name: STRATEGY_FILE
+            value: "conf_v2_with_controllers_2.yml"
+          - name: DEPLOY_INFO
+            value: "${DEPLOY_INFO}"
+        volumeMounts:
+          - name: volume
+            mountPath: /mnt/hummingbot
+  volumes:
+    - name: volume
+      azureFile:
+        shareName: "ci-hb-keep-market"
+        storageAccountName: stdfxapidev
+        storageAccountKey: "${STORAGE_KEY}"
+  restartPolicy: Always
+  imageRegistryCredentials:
+    - server: index.docker.io
+      username: "${DOCKER_USERNAME}"
+      password: "${DOCKER_PASSWORD}"
+  diagnostics:
+    logAnalytics:
+      workspaceId: "${LOG_WORKSPACE_ID}"
+      workspaceKey: "${LOG_WORKSPACE_KEY}"

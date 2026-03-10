@@ -1,0 +1,14 @@
+id: keep_market_pmm_2
+controller_name: keep_market_pmm
+controller_type: custom
+total_amount_quote: '10'
+manual_kill_switch: false
+candles_config: []
+initial_positions: []
+update_interval: 15.0
+trading_connector: xt
+trading_pair: DEPS-USDT
+order_amount_quote: '10'
+price_source: custom_api
+price_source_custom_api: https://api.deuro.com/prices/deps
+custom_api_quote_key: usd
