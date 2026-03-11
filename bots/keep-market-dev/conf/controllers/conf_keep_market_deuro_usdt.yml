@@ -12,3 +12,4 @@ order_amount_quote: '10'
 price_source: custom_api
 price_source_custom_api: https://api.deuro.com/prices/eur
 custom_api_quote_key: usd
+reference_price_drift_percentage: '0.002'
