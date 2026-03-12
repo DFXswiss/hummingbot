@@ -9,23 +9,23 @@ strategy: custom_market_making
 exchange: xt
 
 # Token trading pair for the exchange
-market: DEPS-USDT ## IMPORTANT TODO: change to JUSD-USDT
+market: JUSD-USDT
 
 # How far away from mid price to place the bid order.
 # Spread of 1 = 1% away from mid price at that time.
 # Example if mid price is 100 and bid_spread is 1.
 # Your bid is placed at 99.
-bid_spread: 5 ## IMPORTANT TODO: change to 0.1
+bid_spread: 0.1
 
 # How far away from mid price to place the ask order.
 # Spread of 1 = 1% away from mid price at that time.
 # Example if mid price is 100 and ask_spread is 1.
 # Your bid is placed at 101.
-ask_spread: 5 ## IMPORTANT TODO: change to 0.1
+ask_spread: 0.1
 
 # Minimum Spread
 # How far away from the mid price to cancel active orders (-100 deactivated)
-minimum_spread: 0.002 ## IMPORTANT TODO: change to 0.001
+minimum_spread: -100
 
 # Time in seconds before cancelling and placing new orders.
 # If the value is 60, the bot cancels active orders and placing new ones after a minute.
@@ -36,10 +36,10 @@ max_order_age: 86400.0
 
 # The spread (from mid price) to defer order refresh process to the next cycle.
 # (Enter 1 to indicate 1%), value below 0, e.g. -1, is to disable this feature - not recommended.
-order_refresh_tolerance_pct: 0.21 ## IMPORTANT TODO: change to 0.1
+order_refresh_tolerance_pct: 0.025
 
 # Size of your bid and ask order.
-order_amount: 300 ## IMPORTANT TODO: review technical requirements
+order_amount: 150
 
 # Price band ceiling.
 price_ceiling: -1.0
@@ -76,13 +76,13 @@ inventory_range_multiplier: 1.0
 inventory_price: 1.0
 
 # Number of levels of orders to place on each side of the order book.
-order_levels: 0 ## IMPORTANT TODO: change to 60 , 0 is for turning off the strategy
+order_levels: 60
 
 # Increase or decrease size of consecutive orders after the first order (if order_levels > 1).
 order_level_amount: 0
 
 # Order price space between orders (if order_levels > 1).
-order_level_spread: 0.035
+order_level_spread: 0.05
 
 # How long to wait before placing the next order in case your order gets filled.
 filled_order_delay: 1
@@ -122,13 +122,13 @@ price_source_market:
 price_source_custom_api: 
 
 # A fixed hardcoded price (for fixed_price pricing source).
-price_source_fixed_price: 0.01905 ## IMPORTANT TODO: change to 1 JUSD-USDT
+price_source_fixed_price: 1.0
 
 # Invert custom api price
 invert_custom_api_price: false
 
 # An interval time in second to update the price from custom api (for custom_api pricing source).
-custom_api_update_interval: 10.0
+custom_api_update_interval: 5.0
 
 #Take order if they cross order book when external price source is enabled
 take_if_crossed: true
