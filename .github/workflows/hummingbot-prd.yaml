@@ -8,6 +8,7 @@ on:
 env:
   CRYPTO_PAIR_01: deuro-usdt
   CRYPTO_PAIR_02: deps-usdt
+  KEEP_MARKET_BOT: keep-market
   DOCKER_TAGS: dfxswiss/hummingbot:latest
   AZURE_RESOURCE_GROUP: rg-dfx-api-prd
   AZURE_STORAGE_ACCOUNT_NAME: stdfxapiprd
@@ -40,6 +41,7 @@ jobs:
           context: .
           push: true
           tags: ${{ env.DOCKER_TAGS }}
+          no-cache: true
 
       - name: Log in to Azure
         uses: azure/login@v2
@@ -96,20 +98,36 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Render deployment YAML for keep-market
+        uses: nowactions/envsubst@v1
+        with:
+          input: ./aci-keep-market-prd.yaml
+          output: ./rendered-aci-keep-market-prd.yaml
+        env:
+          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
+          STORAGE_KEY: ${{ env.STORAGE_KEY }}
+          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
+          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
       - name: Stop Azure Container Instance
         run: |
           az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-prd
           az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-prd
+          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.KEEP_MARKET_BOT }}-prd
 
       - name: Delete Azure Container Instance
         run: |
           az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-prd --yes
           az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-prd --yes
+          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.KEEP_MARKET_BOT }}-prd --yes
 
       - name: Deploy container instance
         run: |
           az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-prd.yaml
           az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-prd.yaml
+          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-keep-market-prd.yaml
 
       - name: Logout from Azure
         run: |

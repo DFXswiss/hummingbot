@@ -106,7 +106,7 @@ bid_order_optimization_depth: null
 # Whether to enable adding transaction costs to order price calculation (true/false).
 add_transaction_costs: null
 
-# The price source (current_market/external_market/custom_api).
+# The price source (current_market/external_market/custom_api/fixed_price).
 price_source: null
 
 # The price type (mid_price/last_price/last_own_trade_price/best_bid/best_ask/inventory_cost).
@@ -120,6 +120,9 @@ price_source_market: null
 
 # An external api that returns price (for custom_api pricing source).
 price_source_custom_api: null
+
+# A fixed hardcoded price (for fixed_price pricing source).
+price_source_fixed_price: null
 
 # An interval time in second to update the price from custom api (for custom_api pricing source).
 custom_api_update_interval: null

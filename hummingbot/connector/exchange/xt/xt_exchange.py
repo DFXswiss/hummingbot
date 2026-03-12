@@ -459,10 +459,10 @@ class XtExchange(ExchangePyBase):
             api_params["timeInForce"] = CONSTANTS.TIME_IN_FORCE_GTC
         
         order_result = await self._api_post(
-            path_url=CONSTANTS.CREATE_ORDER_PATH_URL,
+            path_url=CONSTANTS.ORDER_PATH_URL,
             data=api_params,
             is_auth_required=True,
-            limit_id=CONSTANTS.CREATE_ORDER_PATH_URL
+            limit_id=CONSTANTS.ORDER_PATH_URL
         )
         
         if order_result.get("rc") != 0:
@@ -1111,7 +1111,10 @@ class XtExchange(ExchangePyBase):
             limit_id=CONSTANTS.GLOBAL_RATE_LIMIT
         )
 
-        return float(resp_json["result"]["p"])
+        result = resp_json["result"]
+        if isinstance(result, list):
+            result = result[0]
+        return float(result["p"])
 
     async def _get_open_orders(self):
         """
