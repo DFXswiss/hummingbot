@@ -1,0 +1,16 @@
+id: keep_market_pmm_3
+controller_name: keep_market_pmm
+controller_type: custom
+total_amount_quote: '10'
+manual_kill_switch: false
+candles_config: []
+initial_positions: []
+update_interval: 15.0
+trading_connector: xt
+trading_pair: JUSD-USDT
+order_amount_quote: '10'
+price_source: fixed_price
+price_source_custom_api: null
+custom_api_quote_key: usd
+price_source_fixed_price: '1'
+reference_price_drift_percentage: '0.001'
