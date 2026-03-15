@@ -64,7 +64,8 @@ class KeepMarketPMM(ControllerBase):
             return self.config.price_source_fixed_price
         if self.config.price_source == "custom_api":
             try:
-                async with aiohttp.ClientSession() as session:
+                timeout = aiohttp.ClientTimeout(total=5)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(self.config.price_source_custom_api) as resp:
                         data = await resp.json()
                         return Decimal(str(data[self.config.custom_api_quote_key]))
