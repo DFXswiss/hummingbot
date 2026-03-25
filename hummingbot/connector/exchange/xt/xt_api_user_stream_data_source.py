@@ -69,6 +69,8 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
                     self._ping_task.cancel()
                     try:
                         await self._ping_task
+                    except asyncio.CancelledError:
+                        pass
                     except Exception:
                         pass
 
