@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from hummingbot.connector.exchange.xt import xt_constants as CONSTANTS, xt_web_utils as web_utils
@@ -30,6 +31,12 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._current_listen_key = None
         self._domain = domain
         self._api_factory = api_factory
+        self._last_stream_ready_time = 0.0
+
+    @property
+    def last_recv_time(self) -> float:
+        # Consider the stream initialized once we successfully connect and subscribe.
+        return max(super().last_recv_time, self._last_stream_ready_time)
 
     async def listen_for_user_stream(self, output: asyncio.Queue):
         """
@@ -46,6 +53,7 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 self.logger().info(f"Fetched XT listenKey: {self._current_listen_key}")
                 await self._subscribe_channels(websocket_assistant=self._ws_assistant)
                 self.logger().info("Subscribed to private account and orders channels...")
+                self._last_stream_ready_time = time.time()
                 # Start background ping loop
                 self._ping_task = asyncio.create_task(self._send_raw_ping(self._ws_assistant))
                 await self._process_websocket_messages(websocket_assistant=self._ws_assistant, queue=output)
@@ -53,7 +61,7 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 raise
             except Exception:
                 self.logger().exception("Unexpected error while listening to user stream. Retrying after 5 seconds...")
-                await self._sleep(1.0)
+                await self._sleep(5.0)
             finally:
                 await self._on_user_stream_interruption(websocket_assistant=self._ws_assistant)
                 self._ws_assistant = None
@@ -61,6 +69,8 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
                     self._ping_task.cancel()
                     try:
                         await self._ping_task
+                    except asyncio.CancelledError:
+                        pass
                     except Exception:
                         pass
 
@@ -128,6 +138,7 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
         await super()._on_user_stream_interruption(websocket_assistant=websocket_assistant)
         self._current_listen_key = None
+        self._last_stream_ready_time = 0.0
 
     async def _send_raw_ping(self, ws: WSAssistant):
         """Send a raw 'ping' string every WS_HEARTBEAT_TIME_INTERVAL seconds."""

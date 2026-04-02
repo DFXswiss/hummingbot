@@ -45,6 +45,7 @@ fi
 
 # Start Hummingbot with the strategy
 strategyFile=`printenv STRATEGY_FILE`
+scriptFile=`printenv SCRIPT_FILE` || true
 
 if [[ ! -z $strategyFile ]]
 then
@@ -52,7 +53,13 @@ then
 
   password="$(cat /home/hummingbot/conf/.password)"
 
-  bash --login -c "conda activate hummingbot && /home/hummingbot/bin/hummingbot_quickstart.py --headless -p ${password} -f ${strategyFile}"
+  if [[ ! -z $scriptFile ]]
+  then
+    echo "$(date): 'SCRIPT_FILE' is ${scriptFile}" >> $myLogFile
+    bash --login -c "conda activate hummingbot && /home/hummingbot/bin/hummingbot_quickstart.py --headless -p ${password} -f ${scriptFile} -c ${strategyFile}"
+  else
+    bash --login -c "conda activate hummingbot && /home/hummingbot/bin/hummingbot_quickstart.py --headless -p ${password} -f ${strategyFile}"
+  fi
 else
   echo "$(date): No 'STRATEGY_FILE' environment variable set" >> $myLogFile
 fi
