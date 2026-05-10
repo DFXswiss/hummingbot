@@ -6,22 +6,13 @@ on:
   workflow_dispatch:
 
 env:
-  CRYPTO_PAIR_01: deuro-usdt
-  CRYPTO_PAIR_02: deps-usdt
-  KEEP_MARKET_BOT: keep-market
-  DOCKER_TAGS: dfxswiss/hummingbot:latest
-  AZURE_RESOURCE_GROUP: rg-dfx-api-prd
-  AZURE_STORAGE_ACCOUNT_NAME: stdfxapiprd
-  AZURE_WORKSPACE_NAME: log-dfx-api-prd
-  DEPLOY_INFO: ${{ github.ref_name }}-${{ github.sha }}
+  DOCKER_IMAGE: dfxswiss/hummingbot
+  DOCKER_TAG: latest
 
 jobs:
-  build-and-deploy:
-    name: Build, test and deploy to PRD
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: .
+  build-and-publish:
+    name: Build and publish image
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,96 +31,22 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.DOCKER_TAGS }}
-          no-cache: true
+          platforms: linux/arm64
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
 
-      - name: Log in to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.DFX_PRD_CREDENTIALS }}
-
-      - name: Get Storage Key
-        run: |
-          STORAGE_KEY=$(az storage account keys list \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --account-name ${{ env.AZURE_STORAGE_ACCOUNT_NAME }} \
-            --query '[0].value' -o tsv)
-          echo "STORAGE_KEY=$STORAGE_KEY" >> $GITHUB_ENV
-
-      - name: Get Log Analytics Info
-        run: |
-          LOG_WORKSPACE_ID=$(az monitor log-analytics workspace show \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --workspace-name ${{ env.AZURE_WORKSPACE_NAME }} \
-            --query customerId -o tsv)
-
-          LOG_WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --workspace-name ${{ env.AZURE_WORKSPACE_NAME }} \
-            --query primarySharedKey -o tsv)
-          echo "LOG_WORKSPACE_ID=$LOG_WORKSPACE_ID" >> $GITHUB_ENV
-          echo "LOG_WORKSPACE_KEY=$LOG_WORKSPACE_KEY" >> $GITHUB_ENV
-
-      - name: Render deployment YAML for CRYPTO_PAIR_01
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-prd.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-prd.yaml
+      - name: Notify server repo (image published)
+        if: github.event_name == 'push'
         env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_01 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Render deployment YAML for CRYPTO_PAIR_02
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-prd.yaml
-          output: ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-prd.yaml
-        env:
-          CRYPTO_PAIR:  ${{ env.CRYPTO_PAIR_02 }}
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Render deployment YAML for keep-market
-        uses: nowactions/envsubst@v1
-        with:
-          input: ./aci-keep-market-prd.yaml
-          output: ./rendered-aci-keep-market-prd.yaml
-        env:
-          DEPLOY_INFO: ${{ env.DEPLOY_INFO }}
-          STORAGE_KEY: ${{ env.STORAGE_KEY }}
-          LOG_WORKSPACE_ID: ${{ env.LOG_WORKSPACE_ID }}
-          LOG_WORKSPACE_KEY: ${{ env.LOG_WORKSPACE_KEY }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Stop Azure Container Instance
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          DISPATCH_REPO: ${{ secrets.DISPATCH_REPO }}
         run: |
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-prd
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-prd
-          az container stop --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.KEEP_MARKET_BOT }}-prd
-
-      - name: Delete Azure Container Instance
-        run: |
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_01 }}-prd --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.CRYPTO_PAIR_02 }}-prd --yes
-          az container delete --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ci-dfx-hb-${{ env.KEEP_MARKET_BOT }}-prd --yes
-
-      - name: Deploy container instance
-        run: |
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_01 }}-prd.yaml
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-${{ env.CRYPTO_PAIR_02 }}-prd.yaml
-          az container create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --file ./rendered-aci-keep-market-prd.yaml
-
-      - name: Logout from Azure
-        run: |
-          az logout
-        if: always()
+          if [ -z "$DISPATCH_REPO" ] || [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DISPATCH_REPO or DISPATCH_TOKEN not configured — skipping deploy notification"
+            exit 0
+          fi
+          gh api "repos/$DISPATCH_REPO/dispatches" \
+            -f event_type=image-published \
+            -f "client_payload[image]=${{ env.DOCKER_IMAGE }}" \
+            -f "client_payload[sha]=${{ github.sha }}"
