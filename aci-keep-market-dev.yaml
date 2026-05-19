@@ -7,7 +7,7 @@ properties:
   containers:
     - name: "hb-keep-market"
       properties:
-        image: dfxswiss/hummingbot:beta
+        image: ${IMAGE_REF}
         resources:
           requests:
             cpu: 0.5
